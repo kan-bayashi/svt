@@ -19,3 +19,6 @@ Thumbs.db
 
 # Test artifacts
 *.profraw
+
+# Others
+.claude/src
