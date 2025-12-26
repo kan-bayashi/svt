@@ -1,6 +1,6 @@
 # Architecture
 
-`sivit` is a terminal image viewer built around Kitty Graphics Protocol (KGP).
+`svt` is a terminal image viewer built around Kitty Graphics Protocol (KGP).
 The core goal is: keep navigation/status updates responsive even when image rendering or terminal I/O is slow.
 
 ## High-level pipeline
@@ -56,7 +56,7 @@ This design prevents "blank screen" issues that occur when image data is partial
 
 ## KGP ID Strategy
 
-`sivit` uses a single KGP ID per process (inspired by Yazi):
+`svt` uses a single KGP ID per process (inspired by Yazi):
 
 - The ID is generated at startup based on the process ID.
 - RGB components are ensured to be >= 16 to avoid terminal color quantization issues.
@@ -75,10 +75,10 @@ This approach:
 
 ## Caching
 
-`sivit` uses a **client-side render cache** only:
+`svt` uses a **client-side render cache** only:
 
 - **Render cache** (`render_cache` in `App`): Stores decoded/resized/encoded image data.
-- Size controlled by `SIVIT_RENDER_CACHE_SIZE` (default: 15).
+- Size controlled by `SVT_RENDER_CACHE_SIZE` (default: 15).
 - LRU eviction when cache is full.
 
 The terminal-side cache is **not** relied upon. Each transmit starts with `delete_by_id` to ensure a clean slate. This trades some bandwidth for simplicity and correctness.

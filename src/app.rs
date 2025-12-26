@@ -35,7 +35,7 @@ fn render_cache_limit() -> usize {
     const DEFAULT: usize = 100;
     const MAX: usize = 500;
 
-    std::env::var("SIVIT_RENDER_CACHE_SIZE")
+    std::env::var("SVT_RENDER_CACHE_SIZE")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT)
@@ -442,7 +442,7 @@ impl App {
     }
 
     fn prefetch_count() -> usize {
-        std::env::var("SIVIT_PREFETCH_COUNT")
+        std::env::var("SVT_PREFETCH_COUNT")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(5)
@@ -569,7 +569,7 @@ impl App {
             resolution,
         );
 
-        if std::env::var_os("SIVIT_DEBUG").is_some() {
+        if std::env::var_os("SVT_DEBUG").is_some() {
             if self.is_tmux {
                 status.push_str(" tmux");
             }

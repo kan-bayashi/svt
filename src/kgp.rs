@@ -129,10 +129,10 @@ pub fn erase_rows(area: Rect) -> Vec<Vec<u8>> {
 }
 
 fn compression_level() -> Option<u32> {
-    if std::env::var_os("SIVIT_KGP_NO_COMPRESS").is_some() {
+    if std::env::var_os("SVT_KGP_NO_COMPRESS").is_some() {
         return None;
     }
-    let level = std::env::var("SIVIT_COMPRESS_LEVEL")
+    let level = std::env::var("SVT_COMPRESS_LEVEL")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(6)
@@ -151,8 +151,8 @@ pub fn encode_chunks(img: &DynamicImage, id: u32, is_tmux: bool) -> Vec<Vec<u8>>
 
     let compress_level = compression_level();
     let data = if let Some(level) = compress_level {
-        use flate2::write::ZlibEncoder;
         use flate2::Compression;
+        use flate2::write::ZlibEncoder;
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(level));
         let _ = encoder.write_all(&raw);
         encoder.finish().unwrap_or(raw)

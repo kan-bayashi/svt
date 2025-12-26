@@ -125,7 +125,7 @@ impl ImageWorker {
             // Apply max pixels limit (for tmux+kitty compatibility).
             // In `Fit` mode we allow larger images (may be slower / unsupported in some setups).
             if req.fit_mode != FitMode::Fit {
-                let max_pixels: u64 = std::env::var("SIVIT_TMUX_KITTY_MAX_PIXELS")
+                let max_pixels: u64 = std::env::var("SVT_TMUX_KITTY_MAX_PIXELS")
                     .ok()
                     .and_then(|s| s.parse::<u64>().ok())
                     .unwrap_or(2_000_000);
@@ -158,12 +158,12 @@ impl ImageWorker {
             let encoded_chunks = encode_chunks(&resized, req.kgp_id, req.is_tmux);
             let encode_elapsed = encode_start.elapsed();
 
-            if std::env::var_os("SIVIT_TRACE_WORKER").is_some() {
+            if std::env::var_os("SVT_TRACE_WORKER").is_some() {
                 use std::io::Write as _;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open("/tmp/sivit_worker.log")
+                    .open("/tmp/svt_worker.log")
                 {
                     let _ = writeln!(
                         f,

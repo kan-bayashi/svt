@@ -1,8 +1,8 @@
 [package]
-name = "sivit"
-version = "2025.12.26"
+name = "svt"
+version = "25.12.1"
 edition = "2024"
-description = "Simple Image Viewer In Terminal - sxiv-like terminal image viewer"
+description = "Simple Viewer in Terminal - sxiv-like terminal image viewer"
 
 [dependencies]
 ratatui = { version = "0.29", features = ["crossterm"] }

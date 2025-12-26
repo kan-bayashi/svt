@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to `sivit`.
+Thanks for contributing to `svt`.
 
 ## Quick start
 
@@ -33,8 +33,8 @@ cargo clippy --all-targets --all-features
 
 | Env | Description |
 |-----|-------------|
-| `SIVIT_TRACE_WORKER=1` | Write worker timing logs to `/tmp/sivit_worker.log` |
-| `SIVIT_DEBUG=1` | Add debug info to status bar |
+| `SVT_TRACE_WORKER=1` | Write worker timing logs to `/tmp/svt_worker.log` |
+| `SVT_DEBUG=1` | Add debug info to status bar |
 
 ## Tips
 

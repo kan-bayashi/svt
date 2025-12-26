@@ -34,15 +34,15 @@ use crate::app::App;
 use crate::app::is_tmux_env;
 
 fn use_alt_screen() -> bool {
-    let force_alt = std::env::var_os("SIVIT_FORCE_ALT_SCREEN").is_some();
-    let disable_alt = std::env::var_os("SIVIT_NO_ALT_SCREEN").is_some();
+    let force_alt = std::env::var_os("SVT_FORCE_ALT_SCREEN").is_some();
+    let disable_alt = std::env::var_os("SVT_NO_ALT_SCREEN").is_some();
     force_alt || (!disable_alt && !is_tmux_env())
 }
 
 fn nav_latch_delay() -> Duration {
     const DEFAULT_MS: u64 = 150;
     const MAX_MS: u64 = 5_000;
-    let ms = std::env::var("SIVIT_NAV_LATCH_MS")
+    let ms = std::env::var("SVT_NAV_LATCH_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(DEFAULT_MS)
@@ -51,7 +51,7 @@ fn nav_latch_delay() -> Duration {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "sivit", about = "Simple Image Viewer In Terminal")]
+#[command(name = "svt", about = "Simple Viewer in Terminal")]
 struct Cli {
     /// Image file(s) and/or directory path(s)
     #[arg(required = true)]
@@ -307,19 +307,19 @@ mod tests {
 
     #[test]
     fn test_cli_parses_file_path() {
-        let cli = Cli::try_parse_from(["sivit", "image.png"]).unwrap();
+        let cli = Cli::try_parse_from(["svt", "image.png"]).unwrap();
         assert_eq!(cli.paths, vec![PathBuf::from("image.png")]);
     }
 
     #[test]
     fn test_cli_parses_directory_path() {
-        let cli = Cli::try_parse_from(["sivit", "/home/user/photos"]).unwrap();
+        let cli = Cli::try_parse_from(["svt", "/home/user/photos"]).unwrap();
         assert_eq!(cli.paths, vec![PathBuf::from("/home/user/photos")]);
     }
 
     #[test]
     fn test_cli_requires_paths_argument() {
-        let result = Cli::try_parse_from(["sivit"]);
+        let result = Cli::try_parse_from(["svt"]);
         assert!(result.is_err());
     }
 
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_single_file() {
-        let dir = PathBuf::from("/tmp/sivit_test_single");
+        let dir = PathBuf::from("/tmp/svt_test_single");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("test.png");
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_directory() {
-        let dir = PathBuf::from("/tmp/sivit_test_dir");
+        let dir = PathBuf::from("/tmp/svt_test_dir");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         File::create(dir.join("a.png")).unwrap();
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_non_image_file_error() {
-        let dir = PathBuf::from("/tmp/sivit_test_non_image");
+        let dir = PathBuf::from("/tmp/svt_test_non_image");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("test.txt");
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_empty_dir_error() {
-        let dir = PathBuf::from("/tmp/sivit_test_empty");
+        let dir = PathBuf::from("/tmp/svt_test_empty");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 

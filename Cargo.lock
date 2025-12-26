@@ -1318,19 +1318,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sivit"
-version = "2025.12.26"
-dependencies = [
- "anyhow",
- "base64-simd",
- "clap",
- "flate2",
- "image",
- "ratatui",
- "ratatui-image",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1374,6 +1361,19 @@ dependencies = [
  "quote",
  "rustversion",
  "syn",
+]
+
+[[package]]
+name = "svt"
+version = "25.12.1"
+dependencies = [
+ "anyhow",
+ "base64-simd",
+ "clap",
+ "flate2",
+ "image",
+ "ratatui",
+ "ratatui-image",
 ]
 
 [[package]]

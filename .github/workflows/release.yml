@@ -39,7 +39,7 @@ jobs:
       - name: Build and upload binaries
         uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: sivit
+          bin: svt
           target: ${{ matrix.target }}
           toolchain: stable
           checksum: sha256
