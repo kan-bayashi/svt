@@ -12,6 +12,7 @@
 //! Terminal output is centralized in `TerminalWriter` (see `src/sender.rs`).
 
 mod app;
+mod config;
 mod fit;
 mod kgp;
 mod sender;
@@ -32,23 +33,7 @@ use ratatui::layout::Rect;
 
 use crate::app::App;
 use crate::app::is_tmux_env;
-
-fn use_alt_screen() -> bool {
-    let force_alt = std::env::var_os("SVT_FORCE_ALT_SCREEN").is_some();
-    let disable_alt = std::env::var_os("SVT_NO_ALT_SCREEN").is_some();
-    force_alt || (!disable_alt && !is_tmux_env())
-}
-
-fn nav_latch_delay() -> Duration {
-    const DEFAULT_MS: u64 = 150;
-    const MAX_MS: u64 = 5_000;
-    let ms = std::env::var("SVT_NAV_LATCH_MS")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(DEFAULT_MS)
-        .min(MAX_MS);
-    Duration::from_millis(ms)
-}
+use crate::config::Config;
 
 #[derive(Parser, Debug)]
 #[command(name = "svt", about = "Simple Viewer in Terminal")]
@@ -106,23 +91,28 @@ fn collect_images(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(out)
 }
 
+fn use_alt_screen(config: &Config) -> bool {
+    config.force_alt_screen || (!config.no_alt_screen && !is_tmux_env())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let images = collect_images(&cli.paths)?;
+    let config = Config::load();
 
-    let use_alt = use_alt_screen();
+    let use_alt = use_alt_screen(&config);
     init_terminal(use_alt)?;
-    let result = run(images);
+    let result = run(images, config);
     restore_terminal(use_alt);
 
     result
 }
 
-fn run(images: Vec<PathBuf>) -> Result<()> {
+fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
     use std::time::Instant;
 
-    let mut app = App::new(images)?;
-    let nav_latch = nav_latch_delay();
+    let nav_latch = Duration::from_millis(config.nav_latch_ms);
+    let mut app = App::new(images, config)?;
     let mut nav_until = Instant::now() - Duration::from_secs(1);
     let mut count: u32 = 0;
     let mut last_status = String::new();

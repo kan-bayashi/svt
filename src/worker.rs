@@ -25,6 +25,9 @@ pub struct ImageRequest {
     pub fit_mode: FitMode,
     pub kgp_id: u32,
     pub is_tmux: bool,
+    pub compress_level: Option<u32>,
+    pub tmux_kitty_max_pixels: u64,
+    pub trace_worker: bool,
 }
 
 pub struct ImageResult {
@@ -125,10 +128,7 @@ impl ImageWorker {
             // Apply max pixels limit (for tmux+kitty compatibility).
             // In `Fit` mode we allow larger images (may be slower / unsupported in some setups).
             if req.fit_mode != FitMode::Fit {
-                let max_pixels: u64 = std::env::var("SVT_TMUX_KITTY_MAX_PIXELS")
-                    .ok()
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(2_000_000);
+                let max_pixels = req.tmux_kitty_max_pixels;
                 let target_pixels = (target_w as u64).saturating_mul(target_h as u64);
                 if target_pixels > max_pixels {
                     let down = (max_pixels as f64 / target_pixels as f64).sqrt();
@@ -155,10 +155,11 @@ impl ImageWorker {
 
             // Encode
             let encode_start = std::time::Instant::now();
-            let encoded_chunks = encode_chunks(&resized, req.kgp_id, req.is_tmux);
+            let encoded_chunks =
+                encode_chunks(&resized, req.kgp_id, req.is_tmux, req.compress_level);
             let encode_elapsed = encode_start.elapsed();
 
-            if std::env::var_os("SVT_TRACE_WORKER").is_some() {
+            if req.trace_worker {
                 use std::io::Write as _;
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true)

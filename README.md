@@ -70,18 +70,37 @@ svt ~/photos/*.jpg
 
 Vim-like counts are supported (e.g. `5j`, `10G`).
 
-## Options
+## Configuration
 
-| Env | Default | Description |
-|-----|---------|-------------|
-| `SVT_NAV_LATCH_MS` | `150` | Navigation latch (ms) before drawing images |
-| `SVT_RENDER_CACHE_SIZE` | `100` | Render cache entries |
-| `SVT_PREFETCH_COUNT` | `5` | Number of images to prefetch ahead/behind |
-| `SVT_COMPRESS_LEVEL` | `6` | Zlib compression level 0-9 |
-| `SVT_KGP_NO_COMPRESS` | unset | Disable zlib compression |
-| `SVT_TMUX_KITTY_MAX_PIXELS` | `2000000` | Max pixels in `Normal` mode (tmux+kitty) |
-| `SVT_FORCE_ALT_SCREEN` | unset | Force alternate screen |
-| `SVT_NO_ALT_SCREEN` | unset | Disable alternate screen |
+Settings can be configured via config file or environment variables.
+
+**Priority:** Environment variables > Config file > Defaults
+
+### Config File
+
+Create `~/.config/svt/config.toml`:
+
+```toml
+nav_latch_ms = 150
+render_cache_size = 100
+prefetch_count = 5
+compress_level = 6
+```
+
+### Options
+
+| Config Key | Env | Default | Description |
+|------------|-----|---------|-------------|
+| `nav_latch_ms` | `SVT_NAV_LATCH_MS` | `150` | Navigation latch (ms) before drawing images |
+| `render_cache_size` | `SVT_RENDER_CACHE_SIZE` | `100` | Render cache entries |
+| `prefetch_count` | `SVT_PREFETCH_COUNT` | `5` | Number of images to prefetch ahead/behind |
+| `compress_level` | `SVT_COMPRESS_LEVEL` | `6` | Zlib compression level 0-9 |
+| `kgp_no_compress` | `SVT_KGP_NO_COMPRESS` | `false` | Disable zlib compression |
+| `tmux_kitty_max_pixels` | `SVT_TMUX_KITTY_MAX_PIXELS` | `2000000` | Max pixels in `Normal` mode (tmux+kitty) |
+| `force_alt_screen` | `SVT_FORCE_ALT_SCREEN` | `false` | Force alternate screen |
+| `no_alt_screen` | `SVT_NO_ALT_SCREEN` | `false` | Disable alternate screen |
+| `debug` | `SVT_DEBUG` | `false` | Show debug info in status bar |
+| `trace_worker` | `SVT_TRACE_WORKER` | `false` | Write worker timing logs to `/tmp/svt_worker.log` |
 
 ## Contributing
 

@@ -17,6 +17,7 @@ use anyhow::Result;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
 
+use crate::config::Config;
 use crate::fit::FitMode;
 use crate::kgp::KgpState;
 use crate::sender::{StatusIndicator, TerminalWriter, WriterRequest, WriterResultKind};
@@ -31,17 +32,6 @@ pub struct RenderedImage {
     pub encoded_chunks: Vec<Vec<u8>>,
 }
 
-fn render_cache_limit() -> usize {
-    const DEFAULT: usize = 100;
-    const MAX: usize = 500;
-
-    std::env::var("SVT_RENDER_CACHE_SIZE")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT)
-        .clamp(1, MAX)
-}
-
 pub struct App {
     pub images: Vec<PathBuf>,
     pub current_index: usize,
@@ -49,6 +39,7 @@ pub struct App {
     pub should_quit: bool,
     pub fit_mode: FitMode,
     pub kgp_state: KgpState,
+    config: Config,
     worker: ImageWorker,
     writer: TerminalWriter,
     pending_request: Option<(PathBuf, (u32, u32), FitMode)>,
@@ -79,12 +70,12 @@ fn ensure_tmux_allow_passthrough_on(is_tmux: bool) {
 
 impl App {
     /// Create a new application instance.
-    pub fn new(images: Vec<PathBuf>) -> Result<Self> {
+    pub fn new(images: Vec<PathBuf>, config: Config) -> Result<Self> {
         let is_tmux = is_tmux_env();
         ensure_tmux_allow_passthrough_on(is_tmux);
 
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((8, 16)));
-        let render_cache_limit = render_cache_limit();
+        let render_cache_limit = config.render_cache_size;
         let kgp_id = Self::generate_kgp_id();
         let app = App {
             images,
@@ -93,6 +84,7 @@ impl App {
             should_quit: false,
             fit_mode: FitMode::Normal,
             kgp_state: KgpState::default(),
+            config,
             worker: ImageWorker::new(),
             writer: TerminalWriter::new(),
             pending_request: None,
@@ -436,16 +428,16 @@ impl App {
                 fit_mode: self.fit_mode,
                 kgp_id: self.kgp_id,
                 is_tmux: self.is_tmux,
+                compress_level: self.config.compression_level(),
+                tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
+                trace_worker: self.config.trace_worker,
             });
             self.pending_request = Some(pending_key);
         }
     }
 
-    fn prefetch_count() -> usize {
-        std::env::var("SVT_PREFETCH_COUNT")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(5)
+    fn prefetch_count(&self) -> usize {
+        self.config.prefetch_count
     }
 
     /// Prefetch adjacent images (next and previous) into the render cache.
@@ -456,7 +448,7 @@ impl App {
             return;
         }
 
-        let prefetch_count = Self::prefetch_count();
+        let prefetch_count = self.prefetch_count();
         if prefetch_count == 0 {
             return;
         }
@@ -505,6 +497,9 @@ impl App {
                 fit_mode: self.fit_mode,
                 kgp_id: self.kgp_id,
                 is_tmux: self.is_tmux,
+                compress_level: self.config.compression_level(),
+                tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
+                trace_worker: self.config.trace_worker,
             });
             // Only prefetch one at a time to avoid overwhelming the worker
             break;
@@ -569,7 +564,7 @@ impl App {
             resolution,
         );
 
-        if std::env::var_os("SVT_DEBUG").is_some() {
+        if self.config.debug {
             if self.is_tmux {
                 status.push_str(" tmux");
             }
@@ -599,6 +594,7 @@ mod tests {
             should_quit: false,
             fit_mode: FitMode::Normal,
             kgp_state: KgpState::default(),
+            config: Config::default(),
             worker: ImageWorker::new(),
             writer: TerminalWriter::new(),
             pending_request: None,

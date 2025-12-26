@@ -128,19 +128,12 @@ pub fn erase_rows(area: Rect) -> Vec<Vec<u8>> {
     rows
 }
 
-fn compression_level() -> Option<u32> {
-    if std::env::var_os("SVT_KGP_NO_COMPRESS").is_some() {
-        return None;
-    }
-    let level = std::env::var("SVT_COMPRESS_LEVEL")
-        .ok()
-        .and_then(|s| s.parse::<u32>().ok())
-        .unwrap_or(6)
-        .min(9);
-    Some(level)
-}
-
-pub fn encode_chunks(img: &DynamicImage, id: u32, is_tmux: bool) -> Vec<Vec<u8>> {
+pub fn encode_chunks(
+    img: &DynamicImage,
+    id: u32,
+    is_tmux: bool,
+    compress_level: Option<u32>,
+) -> Vec<Vec<u8>> {
     let (w, h) = (img.width(), img.height());
 
     let (raw, format): (Vec<u8>, u8) = match img {
@@ -148,8 +141,6 @@ pub fn encode_chunks(img: &DynamicImage, id: u32, is_tmux: bool) -> Vec<Vec<u8>>
         DynamicImage::ImageRgba8(v) => (v.as_raw().clone(), 32),
         v => (v.clone().into_rgb8().as_raw().clone(), 24),
     };
-
-    let compress_level = compression_level();
     let data = if let Some(level) = compress_level {
         use flate2::Compression;
         use flate2::write::ZlibEncoder;
