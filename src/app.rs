@@ -26,6 +26,7 @@ pub struct RenderedImage {
     pub path: PathBuf,
     pub target: (u32, u32),
     pub fit_mode: FitMode,
+    pub original_size: (u32, u32),
     pub actual_size: (u32, u32),
     pub encoded_chunks: Vec<Vec<u8>>,
 }
@@ -225,6 +226,7 @@ impl App {
                 path: result.path,
                 target: result.target,
                 fit_mode: result.fit_mode,
+                original_size: result.original_size,
                 actual_size: result.actual_size,
                 encoded_chunks: result.encoded_chunks,
             });
@@ -459,17 +461,43 @@ impl App {
             .to_string()
     }
 
+    /// Get the original resolution of the current image from cache.
+    fn current_image_resolution(&self) -> Option<(u32, u32)> {
+        let path = self.current_path()?;
+        self.render_cache
+            .iter()
+            .find(|r| &r.path == path)
+            .map(|r| r.original_size)
+    }
+
     pub fn status_text(&self) -> String {
+        // Nerdfont icons
+        const ICON_IMAGE: &str = "\u{e60d}"; //  (nf-seti-image)
+        const ICON_FIT: &str = "\u{f004c} "; //  (nf-md-arrow_expand_all)
+        const ICON_NORMAL: &str = "";
+        const SEP: &str = "\u{e0b1}"; //  (Powerline separator)
+
+        let fit_icon = if self.fit_mode == FitMode::Fit {
+            ICON_FIT
+        } else {
+            ICON_NORMAL
+        };
+
+        let resolution = self
+            .current_image_resolution()
+            .map(|(w, h)| format!(" [{w}x{h}]"))
+            .unwrap_or_default();
+
         let mut status = format!(
-            "[{}/{}] {}",
+            "{}{}/{} {} {} {}{}",
+            fit_icon,
             self.current_index + 1,
             self.images.len(),
+            SEP,
+            ICON_IMAGE,
             self.current_image_name(),
+            resolution,
         );
-
-        if self.fit_mode == FitMode::Fit {
-            status.push_str(" fit");
-        }
 
         if std::env::var_os("SIVIT_DEBUG").is_some() {
             if self.is_tmux {
@@ -550,7 +578,10 @@ mod tests {
     #[test]
     fn test_status_text() {
         let app = create_test_app(3);
-        assert!(app.status_text().starts_with("[1/3] test0.png"));
+        let status = app.status_text();
+        // New format: "{fit_icon} 1/3  {image_icon} test0.png"
+        assert!(status.contains("1/3"));
+        assert!(status.contains("test0.png"));
     }
 
     #[test]
@@ -589,6 +620,7 @@ mod tests {
             path: PathBuf::from("x.png"),
             target: (1, 1),
             fit_mode: FitMode::Normal,
+            original_size: (100, 100),
             actual_size: (1, 1),
             encoded_chunks: vec![b"x".to_vec()],
         });

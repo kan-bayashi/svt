@@ -4,6 +4,8 @@
 
 A terminal-based image viewer with sxiv-like keybindings. Works over SSH.
 
+![](./samples/sivit.png)
+
 ## Features
 
 - Kitty Graphics Protocol (KGP) image rendering

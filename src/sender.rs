@@ -346,19 +346,45 @@ impl TerminalWriter {
             return Ok(());
         }
 
+        // Nerdfont icons and Powerline separator
+        const ICON_READY: &str = "\u{f012c}"; //  (nf-md-check)
+        const ICON_BUSY: &str = "\u{f110}"; //  (nf-fa-spinner)
+        const SEP: &str = "\u{e0b0}"; //  (Powerline separator)
+
+        // ANSI 16-color (uses terminal theme colors)
+        // Foreground: 30=Black, 37=White, 90-97=Bright
+        // Background: 40=Black, 47=White, 100-107=Bright
+        const FG_DARK: u8 = 30; // Black
+        const FG_LIGHT: u8 = 97; // Bright White
+        const BG_MAIN: u8 = 40; // Black
+        const BG_READY: u8 = 42; // Green
+        const BG_BUSY: u8 = 43; // Yellow
+
         let row_1based = h;
-        // Reserve 2 columns for "● " prefix.
-        let available = w.saturating_sub(2);
+        // Reserve 4 columns for icon segment " X  " (icon + spaces + separator)
+        let available = w.saturating_sub(4);
         let clipped = clip_utf8(status_text, available as usize);
 
-        // Background first, then ECH so the cleared cells inherit the background.
-        write!(out, "\x1b[{row_1based};1H\x1b[37;100m\x1b[{w}X")?;
-        write!(out, "\x1b[{row_1based};1H")?;
-        match indicator {
-            StatusIndicator::Ready => write!(out, "\x1b[32m●")?, // green
-            StatusIndicator::Busy => write!(out, "\x1b[31m●")?,  // red
-        }
-        write!(out, "\x1b[37;100m {clipped}\x1b[0m")?;
+        let (icon, fg_indicator, bg_indicator) = match indicator {
+            StatusIndicator::Ready => (ICON_READY, BG_READY - 10, BG_READY), // fg=32 (Green)
+            StatusIndicator::Busy => (ICON_BUSY, BG_BUSY - 10, BG_BUSY),     // fg=33 (Yellow)
+        };
+
+        // Clear line with main background
+        write!(out, "\x1b[{row_1based};1H\x1b[{BG_MAIN}m\x1b[{w}X")?;
+
+        // Left segment: indicator icon with colored background
+        write!(
+            out,
+            "\x1b[{row_1based};1H\x1b[{FG_DARK};{bg_indicator}m {icon} "
+        )?;
+
+        // Powerline separator: indicator color -> main background
+        write!(out, "\x1b[{fg_indicator};{BG_MAIN}m{SEP}")?;
+
+        // Main content with light text on dark background
+        write!(out, "\x1b[{FG_LIGHT};{BG_MAIN}m {clipped}\x1b[0m")?;
+
         Ok(())
     }
 }

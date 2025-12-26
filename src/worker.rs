@@ -31,6 +31,7 @@ pub struct ImageResult {
     pub path: PathBuf,
     pub target: (u32, u32),
     pub fit_mode: FitMode,
+    pub original_size: (u32, u32),
     pub actual_size: (u32, u32),
     pub encoded_chunks: Vec<Vec<u8>>,
 }
@@ -187,6 +188,7 @@ impl ImageWorker {
                 path: req.path,
                 target: req.target,
                 fit_mode: req.fit_mode,
+                original_size: (orig_w, orig_h),
                 actual_size,
                 encoded_chunks,
             });
