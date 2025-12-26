@@ -205,8 +205,11 @@ fn run(images: Vec<PathBuf>) -> Result<()> {
                 }
 
                 if did_nav {
-                    // Cancel any in-flight image transmission so status updates stay snappy.
-                    app.cancel_image_output();
+                    // Only cancel if not currently transmitting to avoid blank screens.
+                    // Transmit must complete to ensure image data is in terminal.
+                    if !app.is_transmitting() {
+                        app.cancel_image_output();
+                    }
                     nav_until = Instant::now() + nav_latch;
                     count = 0;
                     // Don't drain all pending repeats in one loop; update status incrementally.

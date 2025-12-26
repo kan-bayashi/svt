@@ -28,7 +28,6 @@ pub struct RenderedImage {
     pub fit_mode: FitMode,
     pub actual_size: (u32, u32),
     pub encoded_chunks: Vec<Vec<u8>>,
-    pub kgp_id: u32,
     pub transmitted: bool,
     pub last_transmit_seq: u64,
 }
@@ -56,9 +55,9 @@ pub struct App {
     pending_request: Option<(PathBuf, (u32, u32), FitMode)>,
     render_cache: Vec<RenderedImage>,
     render_cache_limit: usize,
-    next_kgp_id: u32,
-    in_flight_transmit: Option<u32>,
-    pending_display: Option<(Rect, u32)>,
+    kgp_id: u32,
+    in_flight_transmit: bool,
+    pending_display: Option<Rect>,
     render_epoch: u64,
     transmit_seq: u64,
     force_retransmit: bool,
@@ -86,6 +85,7 @@ impl App {
 
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((8, 16)));
         let render_cache_limit = render_cache_limit();
+        let kgp_id = Self::generate_kgp_id();
         let app = App {
             images,
             current_index: 0,
@@ -98,8 +98,8 @@ impl App {
             pending_request: None,
             render_cache: Vec::with_capacity(render_cache_limit),
             render_cache_limit,
-            next_kgp_id: 1,
-            in_flight_transmit: None,
+            kgp_id,
+            in_flight_transmit: false,
             pending_display: None,
             render_epoch: 0,
             transmit_seq: 0,
@@ -116,20 +116,18 @@ impl App {
         Ok(app)
     }
 
-    fn alloc_kgp_id(&mut self) -> u32 {
-        // Kitty "unicode placeholders" encode the image id into RGB plus an extra diacritic byte.
-        // Some terminals lose exact RGB values when any component is 0 (e.g. treat 0 as "default"),
-        // which can make a transmitted image unplaceable even though we consider it "Ready".
-        // Very low values also appear prone to quantization, so spread ids across RGB.
-        //
-        // Generate a scrambled 32-bit id with each RGB component kept away from 0 so the RGB part
-        // remains distinguishable even under mild quantization.
+    /// Generate a single KGP ID for this process (yazi-style).
+    /// Using a fixed ID ensures terminal-side cache is always overwritten,
+    /// preventing "wrong image" issues from stale data.
+    fn generate_kgp_id() -> u32 {
         const MIN_COMPONENT: u32 = 16;
         const MUL: u32 = 0x9E3779B1;
-        loop {
-            let idx = self.next_kgp_id;
-            self.next_kgp_id = self.next_kgp_id.wrapping_add(1);
 
+        // Start from process ID to get some variation between instances
+        let base = std::process::id();
+        let mut idx = base;
+
+        loop {
             let id = idx.wrapping_mul(MUL).rotate_left(8);
             let r = (id >> 16) & 0xff;
             let g = (id >> 8) & 0xff;
@@ -137,6 +135,7 @@ impl App {
             if r >= MIN_COMPONENT && g >= MIN_COMPONENT && b >= MIN_COMPONENT {
                 return id;
             }
+            idx = idx.wrapping_add(1);
         }
     }
 
@@ -238,7 +237,6 @@ impl App {
                 fit_mode: result.fit_mode,
                 actual_size: result.actual_size,
                 encoded_chunks: result.encoded_chunks,
-                kgp_id: result.kgp_id,
                 transmitted: false,
                 last_transmit_seq: 0,
             });
@@ -250,35 +248,26 @@ impl App {
             if result.epoch != self.render_epoch {
                 continue;
             }
-            let (kgp_id, transmitted) = match result.kind {
-                WriterResultKind::TransmitDone { kgp_id } => (kgp_id, true),
-                WriterResultKind::PlaceDone { kgp_id } => (kgp_id, false),
-            };
+            let transmitted = matches!(result.kind, WriterResultKind::TransmitDone { .. });
 
             if transmitted {
                 self.transmit_seq = self.transmit_seq.saturating_add(1);
                 let seq = self.transmit_seq;
-                // Mark as transmitted in cache
-                for rendered in &mut self.render_cache {
-                    if rendered.kgp_id == kgp_id {
-                        rendered.transmitted = true;
-                        rendered.last_transmit_seq = seq;
-                        break;
+                // Mark current image as transmitted in cache
+                if let Some(path) = self.current_path().cloned() {
+                    for rendered in &mut self.render_cache {
+                        if rendered.path == path {
+                            rendered.transmitted = true;
+                            rendered.last_transmit_seq = seq;
+                            break;
+                        }
                     }
                 }
+                self.in_flight_transmit = false;
             }
 
-            if self.in_flight_transmit == Some(kgp_id) && transmitted {
-                self.in_flight_transmit = None;
-            }
-
-            if self
-                .pending_display
-                .as_ref()
-                .is_some_and(|(_, pending_id)| *pending_id == kgp_id)
-                && let Some((area, id)) = self.pending_display.take()
-            {
-                self.kgp_state.set_last(area, id);
+            if let Some(area) = self.pending_display.take() {
+                self.kgp_state.set_last(area, self.kgp_id);
             }
         }
     }
@@ -295,7 +284,7 @@ impl App {
         if self.pending_display.is_some() {
             return StatusIndicator::Busy;
         }
-        if self.in_flight_transmit.is_some() {
+        if self.in_flight_transmit {
             return StatusIndicator::Busy;
         }
         if self.force_retransmit {
@@ -346,7 +335,7 @@ impl App {
         );
 
         if self.kgp_state.last_area() != Some(area)
-            || self.kgp_state.last_kgp_id() != Some(rendered.kgp_id)
+            || self.kgp_state.last_kgp_id() != Some(self.kgp_id)
         {
             return StatusIndicator::Busy;
         }
@@ -363,15 +352,20 @@ impl App {
         });
     }
 
+    /// Check if a transmit is currently in progress.
+    pub fn is_transmitting(&self) -> bool {
+        self.in_flight_transmit
+    }
+
     /// Cancel any in-flight image output (best-effort).
     pub fn cancel_image_output(&mut self) {
         self.render_epoch = self.render_epoch.saturating_add(1);
         // Get area before clearing pending_display.
         // This area might have partial placement data that needs to be erased.
-        let cancel_area = self.pending_display.map(|(area, _)| area);
+        let cancel_area = self.pending_display;
 
         self.writer.send(WriterRequest::CancelImage {
-            kgp_id: self.in_flight_transmit,
+            kgp_id: Some(self.kgp_id),
             is_tmux: is_tmux_env(),
             area: cancel_area,
             epoch: self.render_epoch,
@@ -379,16 +373,17 @@ impl App {
         self.force_retransmit = true;
         self.clear_after_nav = true;
 
-        // Only invalidate the in-flight entry (not yet fully transmitted).
-        // Entries with transmitted=true have already been sent to terminal
-        // and can be safely re-placed without re-transmission.
-        if let Some(flight_id) = self.in_flight_transmit.take() {
-            for rendered in &mut self.render_cache {
-                if rendered.kgp_id == flight_id {
-                    rendered.transmitted = false;
-                    break;
+        // Invalidate current image's transmitted status if we were transmitting
+        if self.in_flight_transmit {
+            if let Some(path) = self.current_path().cloned() {
+                for rendered in &mut self.render_cache {
+                    if rendered.path == path {
+                        rendered.transmitted = false;
+                        break;
+                    }
                 }
             }
+            self.in_flight_transmit = false;
         }
 
         self.pending_display = None;
@@ -431,10 +426,9 @@ impl App {
             .iter()
             .position(|r| r.path == path && r.target == target && r.fit_mode == self.fit_mode);
         if let Some(idx) = cached_idx {
-            let (kgp_id, actual_size, encoded_chunks, transmitted, last_transmit_seq) = {
+            let (actual_size, encoded_chunks, transmitted, last_transmit_seq) = {
                 let rendered = &self.render_cache[idx];
                 (
-                    rendered.kgp_id,
                     rendered.actual_size,
                     rendered.encoded_chunks.clone(),
                     rendered.transmitted,
@@ -459,23 +453,22 @@ impl App {
                 cells_h,
             );
 
-            // Always transmit to avoid terminal-side cache misses; skip if already displayed
-            // and a refresh is not needed.
+            // Skip if already displayed and a refresh is not needed.
             if self.kgp_state.last_area() == Some(area)
-                && self.kgp_state.last_kgp_id() == Some(kgp_id)
+                && self.kgp_state.last_kgp_id() == Some(self.kgp_id)
                 && !retransmit
             {
                 return;
             }
-            if self.pending_display == Some((area, kgp_id)) {
+            if self.pending_display == Some(area) {
                 return;
             }
 
             // Avoid re-starting a transmit every loop while the current one is still in-flight.
-            if self.in_flight_transmit == Some(kgp_id) {
+            if self.in_flight_transmit {
                 return;
             }
-            self.in_flight_transmit = Some(kgp_id);
+            self.in_flight_transmit = true;
             self.force_retransmit = false;
             if self.clear_after_nav {
                 self.writer.send(WriterRequest::ClearAll {
@@ -488,22 +481,22 @@ impl App {
             self.writer.send(WriterRequest::ImageTransmit {
                 encoded_chunks,
                 area,
-                kgp_id,
+                kgp_id: self.kgp_id,
                 old_area,
                 epoch: self.render_epoch,
+                is_tmux,
             });
-            self.pending_display = Some((area, kgp_id));
+            self.pending_display = Some(area);
             return;
         }
 
         // Request from worker if not already pending
         if self.pending_request.as_ref() != Some(&(path.clone(), target, self.fit_mode)) {
-            let kgp_id = self.alloc_kgp_id();
             self.worker.request(ImageRequest {
                 path: path.clone(),
                 target,
                 fit_mode: self.fit_mode,
-                kgp_id,
+                kgp_id: self.kgp_id,
                 is_tmux,
             });
             self.pending_request = Some((path, target, self.fit_mode));
@@ -578,8 +571,8 @@ mod tests {
             pending_request: None,
             render_cache: Vec::new(),
             render_cache_limit: 5,
-            next_kgp_id: 1,
-            in_flight_transmit: None,
+            kgp_id: App::generate_kgp_id(),
+            in_flight_transmit: false,
             pending_display: None,
             render_epoch: 0,
             transmit_seq: 0,
@@ -664,16 +657,15 @@ mod tests {
             fit_mode: FitMode::Normal,
             actual_size: (1, 1),
             encoded_chunks: vec![b"x".to_vec()],
-            kgp_id: 1,
             transmitted: true,
             last_transmit_seq: 1,
         });
         app.pending_request = Some((PathBuf::from("y.png"), (1, 1), FitMode::Normal));
-        app.in_flight_transmit = Some(1);
+        app.in_flight_transmit = true;
 
         app.reload();
         assert!(app.render_cache.is_empty());
         assert!(app.pending_request.is_none());
-        assert!(app.in_flight_transmit.is_none());
+        assert!(!app.in_flight_transmit);
     }
 }

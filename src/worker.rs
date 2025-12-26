@@ -33,7 +33,6 @@ pub struct ImageResult {
     pub fit_mode: FitMode,
     pub actual_size: (u32, u32),
     pub encoded_chunks: Vec<Vec<u8>>,
-    pub kgp_id: u32,
 }
 
 pub struct ImageWorker {
@@ -190,7 +189,6 @@ impl ImageWorker {
                 fit_mode: req.fit_mode,
                 actual_size,
                 encoded_chunks,
-                kgp_id: req.kgp_id,
             });
         }
     }

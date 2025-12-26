@@ -18,7 +18,7 @@ use std::thread::{self, JoinHandle};
 
 use ratatui::layout::Rect;
 
-use crate::kgp::{delete_all, erase_rows, place_rows};
+use crate::kgp::{delete_all, delete_by_id, erase_rows, place_rows};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusIndicator {
@@ -40,6 +40,7 @@ pub enum WriterRequest {
         kgp_id: u32,
         old_area: Option<Rect>,
         epoch: u64,
+        is_tmux: bool,
     },
     #[allow(dead_code)]
     /// Place a previously transmitted image in the terminal area.
@@ -295,6 +296,7 @@ impl TerminalWriter {
                 kgp_id,
                 old_area,
                 epoch,
+                is_tmux,
             } => {
                 if epoch < *current_epoch {
                     return;
@@ -308,6 +310,7 @@ impl TerminalWriter {
                     old_area,
                     cleanup_area,
                     epoch,
+                    is_tmux,
                 ));
             }
             WriterRequest::ImagePlace {
@@ -373,6 +376,7 @@ impl TerminalWriter {
         old_area: Option<Rect>,
         dirty_area: Option<Rect>,
         epoch: u64,
+        is_tmux: bool,
     ) -> Task {
         let mut chunks = VecDeque::new();
 
@@ -389,12 +393,16 @@ impl TerminalWriter {
             }
         }
 
-        // Step 2: Transmit new image data
+        // Step 2: Delete existing image data for this ID
+        // This prevents stale data from being displayed if transmit is cancelled
+        chunks.push_back(delete_by_id(kgp_id, is_tmux));
+
+        // Step 3: Transmit new image data
         for enc in encoded_chunks {
             chunks.push_back(enc);
         }
 
-        // Step 3: Place new image
+        // Step 4: Place new image
         for row in place_rows(area, kgp_id) {
             chunks.push_back(row);
         }

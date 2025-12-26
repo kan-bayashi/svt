@@ -28,6 +28,18 @@ pub fn delete_all(is_tmux: bool) -> Vec<u8> {
     buf
 }
 
+pub fn delete_by_id(id: u32, is_tmux: bool) -> Vec<u8> {
+    let (start, escape, close) = if is_tmux {
+        (TMUX_START, TMUX_ESCAPE, TMUX_CLOSE)
+    } else {
+        ("\x1b", "\x1b", "")
+    };
+
+    let mut buf = Vec::with_capacity(64);
+    _ = write!(buf, "{start}_Gq=2,a=d,d=i,i={id}{escape}\\{close}");
+    buf
+}
+
 #[derive(Default)]
 pub struct KgpState {
     last_area: Option<Rect>,
