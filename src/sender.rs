@@ -224,6 +224,7 @@ impl TerminalWriter {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn apply_msg(
         msg: WriterRequest,
         should_quit: &mut bool,
@@ -415,11 +416,7 @@ impl TerminalWriter {
         }
     }
 
-    fn cleanup_rects(
-        area: Rect,
-        old_area: Option<Rect>,
-        dirty_area: Option<Rect>,
-    ) -> Vec<Rect> {
+    fn cleanup_rects(area: Rect, old_area: Option<Rect>, dirty_area: Option<Rect>) -> Vec<Rect> {
         let mut out = Vec::new();
         if let Some(old) = old_area {
             out.extend(rect_diff(old, area));
@@ -586,10 +583,5 @@ fn union_rect(a: Rect, b: Rect) -> Rect {
     let x1 = ax1.max(bx1);
     let y1 = ay1.max(by1);
 
-    Rect::new(
-        x0 as u16,
-        y0 as u16,
-        (x1 - x0) as u16,
-        (y1 - y0) as u16,
-    )
+    Rect::new(x0 as u16, y0 as u16, (x1 - x0) as u16, (y1 - y0) as u16)
 }
