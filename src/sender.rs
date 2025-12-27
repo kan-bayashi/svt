@@ -478,11 +478,11 @@ impl TerminalWriter {
         let tile_x_end = image_area.x + next_tile_x_cells as u16;
         let tile_y_end = image_area.y + next_tile_y_cells as u16;
 
-        // Unicode box drawing characters
-        const TOP_LEFT: char = '┌';
-        const TOP_RIGHT: char = '┐';
-        const BOTTOM_LEFT: char = '└';
-        const BOTTOM_RIGHT: char = '┘';
+        // Unicode box drawing characters (rounded corners)
+        const TOP_LEFT: char = '╭';
+        const TOP_RIGHT: char = '╮';
+        const BOTTOM_LEFT: char = '╰';
+        const BOTTOM_RIGHT: char = '╯';
         const HORIZONTAL: char = '─';
         const VERTICAL: char = '│';
 
