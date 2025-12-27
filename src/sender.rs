@@ -13,8 +13,8 @@
 
 use std::collections::VecDeque;
 use std::io::{IsTerminal, Write, stdout};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use ratatui::layout::Rect;

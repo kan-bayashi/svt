@@ -12,8 +12,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
 use image::{DynamicImage, RgbaImage};
@@ -480,10 +480,8 @@ impl ImageWorker {
                 let thumbnail = img.resize(scaled_w, scaled_h, filter);
                 let rgba_thumb = Arc::new(thumbnail.to_rgba8());
 
-                let img_x =
-                    info.tile_x + half_pad_w + (info.inner_w.saturating_sub(scaled_w)) / 2;
-                let img_y =
-                    info.tile_y + half_pad_h + (info.inner_h.saturating_sub(scaled_h)) / 2;
+                let img_x = info.tile_x + half_pad_w + (info.inner_w.saturating_sub(scaled_w)) / 2;
+                let img_y = info.tile_y + half_pad_h + (info.inner_h.saturating_sub(scaled_h)) / 2;
 
                 Some((
                     info.path.clone(),
