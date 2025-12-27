@@ -22,12 +22,12 @@ svt/
 │   └── architecture.md
 ├── src/
 │   ├── main.rs    # Entry point, CLI parsing, event loop
-│   ├── app.rs     # App state, navigation, cache orchestration
+│   ├── app.rs     # App state, navigation, cache orchestration, tile grid
 │   ├── config.rs  # Config loading (file + env, priority: env > file > default)
-│   ├── fit.rs     # Fit mode (Normal/Fit)
+│   ├── fit.rs     # Fit mode (Normal/Fit) and View mode (Single/Tile)
 │   ├── kgp.rs     # Kitty Graphics Protocol helpers (encode/place/erase)
-│   ├── sender.rs  # TerminalWriter (single stdout writer, status priority, cancel)
-│   └── worker.rs  # ImageWorker (decode/resize/encode)
+│   ├── sender.rs  # TerminalWriter (single stdout writer, status priority, tile cursor)
+│   └── worker.rs  # ImageWorker (decode/resize/encode, tile composite)
 ```
 
 ## Development Commands

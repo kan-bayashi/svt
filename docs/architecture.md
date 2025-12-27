@@ -22,7 +22,42 @@ There are three concurrent "lanes":
 3. **Terminal writer thread** (`src/sender.rs`)
    - The only component allowed to write to stdout.
    - Prioritizes status updates over image output.
-   - Writes image output in “safe boundaries” (KGP chunk boundaries and per-row placement).
+   - Writes image output in "safe boundaries" (KGP chunk boundaries and per-row placement).
+
+## View Modes
+
+`svt` supports two view modes:
+
+### Single Mode (default)
+- Displays one image at a time
+- Full-size image with Fit/Normal display options
+- Navigation: `h/j/k/l` moves between images
+
+### Tile Mode
+- Displays multiple images as a grid of thumbnails
+- Grid size is calculated from terminal dimensions and `cell_aspect_ratio`
+- Cursor navigation within the grid
+- Press `t` to toggle between modes
+
+### Tile Rendering Architecture
+
+Tile mode uses a **composite image approach**:
+
+1. **Worker thread** (`src/worker.rs`):
+   - Decodes all images for the current page
+   - Resizes each to fit a tile cell (with padding)
+   - Composites all tiles onto a single canvas
+   - Encodes the composite as a single KGP image
+
+2. **Cursor overlay** (`src/sender.rs`):
+   - Cursor border is drawn using ANSI escape sequences
+   - Separate from the composite image for fast cursor movement
+   - Unicode box-drawing characters (┌─┐│└┘) in cyan color
+
+This design ensures:
+- Fast cursor movement (no image re-render needed)
+- Single KGP ID maintained (existing architecture preserved)
+- Efficient caching (cursor position not in cache key)
 
 ## Why a single stdout writer exists
 
@@ -96,6 +131,12 @@ Settings are loaded at startup by `Config::load()` (`src/config.rs`):
 
 The `Config` struct is passed to `App` and propagated to worker requests as needed.
 
+### Tile Mode Settings
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `cell_aspect_ratio` | `2.0` | Terminal cell height/width ratio for square tiles |
+
 ## Invariants
 
 These invariants must be preserved when modifying the codebase:
@@ -118,6 +159,11 @@ These invariants must be preserved when modifying the codebase:
 5. **Transmit must complete once started**
    - Skip cancellation during active transmission (`is_transmitting()`)
    - Ensures terminal receives complete image data
+
+6. **Tile cursor via ANSI overlay**
+   - Cursor is drawn separately from tile composite
+   - Cursor movement does not trigger image re-render
+   - Only page changes invalidate tile cache
 
 ## Clipboard Support
 

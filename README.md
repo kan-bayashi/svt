@@ -14,7 +14,7 @@
 
 </div>
 
-<br>
+## 📽️ Demo
 
 ![](./assets/demo.gif)
 
@@ -27,6 +27,23 @@
 | 📋 **Clipboard** | Copy path (OSC 52, works over SSH) or image to clipboard (local/X11 only) |
 | 🔄 **Flexible** | Fit/Normal display modes, works over SSH with Tmux |
 | 🖼️ **KGP** | Kitty Graphics Protocol for high-quality image rendering |
+| 🗂️ **Tile Mode** | Grid view with thumbnail navigation |
+
+
+## 🖼️ View Modes
+
+<table>
+<tr>
+<td align="center"><b>Normal Mode</b><br><sub>Original size (shrink-only)</sub></td>
+<td align="center"><b>Fit Mode</b><br><sub>Scale to fill viewport</sub></td>
+<td align="center"><b>Tile Mode</b><br><sub>Grid thumbnail view</sub></td>
+</tr>
+<tr>
+<td><img src="./assets/normal.png" width="280"></td>
+<td><img src="./assets/fit.png" width="280"></td>
+<td><img src="./assets/tile.png" width="280"></td>
+</tr>
+</table>
 
 ## 📋 Requirements
 
@@ -88,11 +105,14 @@ svt ~/photos/*.jpg      # Combined
 
 | Key | Action | Description |
 |:---:|--------|-------------|
-| `j` / `Space` / `l` | ➡️ Next | Go to next image |
-| `k` / `Backspace` / `h` | ⬅️ Previous | Go to previous image |
+| `j` / `Space` / `l` | ➡️ Next | Next image / move cursor down-right |
+| `k` / `Backspace` / `h` | ⬅️ Previous | Previous image / move cursor up-left |
 | `g` | ⏮️ First | Jump to first image |
 | `G` | ⏭️ Last | Jump to last image |
 | `f` | 🔄 Toggle | Toggle fit mode |
+| `t` | 🗂️ Tile | Toggle tile/single view |
+| `Enter` | ✅ Select | Select tile (Tile mode) |
+| `H`/`J`/`K`/`L` | 📄 Page | Page navigation (Tile mode) |
 | `r` | 🔃 Reload | Reload and clear cache |
 | `y` | 📋 Copy Path | Copy path to clipboard (OSC 52) |
 | `Y` | 🖼️ Copy Image | Copy image to clipboard (Local or X11) |
@@ -117,6 +137,7 @@ nav_latch_ms = 150
 render_cache_size = 100
 prefetch_count = 5
 compress_level = 6
+cell_aspect_ratio = 2.0
 ```
 
 ### 📊 Options
@@ -133,6 +154,7 @@ compress_level = 6
 | `no_alt_screen` | `SVT_NO_ALT_SCREEN` | `false` | Disable alt screen |
 | `debug` | `SVT_DEBUG` | `false` | Debug mode |
 | `trace_worker` | `SVT_TRACE_WORKER` | `false` | Worker tracing |
+| `cell_aspect_ratio` | `SVT_CELL_ASPECT_RATIO` | `2.0` | Cell aspect ratio (tile grid) |
 
 ## 🤝 Contributing
 
