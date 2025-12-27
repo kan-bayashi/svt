@@ -25,6 +25,10 @@ pub struct Config {
     pub tmux_kitty_max_pixels: u64,
     pub trace_worker: bool,
     pub cell_aspect_ratio: f64,
+    pub resize_filter: String,
+    pub tile_filter: String,
+    pub prefetch_threads: usize,
+    pub tile_threads: usize,
 }
 
 impl Default for Config {
@@ -38,10 +42,33 @@ impl Default for Config {
             debug: false,
             kgp_no_compress: false,
             compress_level: 6,
-            tmux_kitty_max_pixels: 2_000_000,
+            tmux_kitty_max_pixels: 1_500_000,
             trace_worker: false,
             cell_aspect_ratio: 2.0,
+            resize_filter: "triangle".to_string(),
+            tile_filter: "nearest".to_string(),
+            prefetch_threads: 2,
+            tile_threads: 4,
         }
+    }
+}
+
+/// Parse filter type string to image::imageops::FilterType.
+/// Returns Triangle as fallback for invalid values.
+pub fn parse_filter_type(s: &str) -> image::imageops::FilterType {
+    let s = s.trim();
+    if s.eq_ignore_ascii_case("nearest") {
+        image::imageops::FilterType::Nearest
+    } else if s.eq_ignore_ascii_case("triangle") {
+        image::imageops::FilterType::Triangle
+    } else if s.eq_ignore_ascii_case("catmullrom") || s.eq_ignore_ascii_case("catmull-rom") {
+        image::imageops::FilterType::CatmullRom
+    } else if s.eq_ignore_ascii_case("gaussian") {
+        image::imageops::FilterType::Gaussian
+    } else if s.eq_ignore_ascii_case("lanczos3") || s.eq_ignore_ascii_case("lanczos") {
+        image::imageops::FilterType::Lanczos3
+    } else {
+        image::imageops::FilterType::Triangle
     }
 }
 
@@ -98,6 +125,18 @@ impl Config {
         if let Some(v) = Self::parse_env::<f64>("SVT_CELL_ASPECT_RATIO") {
             self.cell_aspect_ratio = v;
         }
+        if let Ok(v) = std::env::var("SVT_RESIZE_FILTER") {
+            self.resize_filter = v;
+        }
+        if let Ok(v) = std::env::var("SVT_TILE_FILTER") {
+            self.tile_filter = v;
+        }
+        if let Some(v) = Self::parse_env::<usize>("SVT_PREFETCH_THREADS") {
+            self.prefetch_threads = v;
+        }
+        if let Some(v) = Self::parse_env::<usize>("SVT_TILE_THREADS") {
+            self.tile_threads = v;
+        }
     }
 
     fn clamp_values(&mut self) {
@@ -109,6 +148,8 @@ impl Config {
         self.render_cache_size = self.render_cache_size.clamp(1, MAX_RENDER_CACHE_SIZE);
         self.compress_level = self.compress_level.min(MAX_COMPRESS_LEVEL);
         self.cell_aspect_ratio = self.cell_aspect_ratio.clamp(1.0, 4.0);
+        self.prefetch_threads = self.prefetch_threads.clamp(1, 8);
+        self.tile_threads = self.tile_threads.clamp(1, 8);
     }
 
     fn parse_env<T: std::str::FromStr>(key: &str) -> Option<T> {
@@ -135,7 +176,7 @@ mod tests {
         assert_eq!(config.render_cache_size, 100);
         assert_eq!(config.prefetch_count, 5);
         assert_eq!(config.compress_level, 6);
-        assert_eq!(config.tmux_kitty_max_pixels, 2_000_000);
+        assert_eq!(config.tmux_kitty_max_pixels, 1_500_000);
         assert!(!config.force_alt_screen);
         assert!(!config.debug);
         assert_eq!(config.cell_aspect_ratio, 2.0);

@@ -136,8 +136,12 @@ Create `~/.config/svt/config.toml`:
 nav_latch_ms = 150
 render_cache_size = 100
 prefetch_count = 5
+prefetch_threads = 2
 compress_level = 6
 cell_aspect_ratio = 2.0
+resize_filter = "triangle"
+tile_filter = "nearest"
+tile_threads = 4
 ```
 
 ### 📊 Options
@@ -147,14 +151,18 @@ cell_aspect_ratio = 2.0
 | `nav_latch_ms` | `SVT_NAV_LATCH_MS` | `150` | Navigation latch (ms) |
 | `render_cache_size` | `SVT_RENDER_CACHE_SIZE` | `100` | Render cache entries |
 | `prefetch_count` | `SVT_PREFETCH_COUNT` | `5` | Prefetch count |
+| `prefetch_threads` | `SVT_PREFETCH_THREADS` | `2` | Prefetch thread count (1-8) |
 | `compress_level` | `SVT_COMPRESS_LEVEL` | `6` | Zlib compression (0-9) |
 | `kgp_no_compress` | `SVT_KGP_NO_COMPRESS` | `false` | Disable compression |
-| `tmux_kitty_max_pixels` | `SVT_TMUX_KITTY_MAX_PIXELS` | `2000000` | Max pixels (tmux+kitty) |
+| `tmux_kitty_max_pixels` | `SVT_TMUX_KITTY_MAX_PIXELS` | `1500000` | Max pixels (tmux+kitty) |
 | `force_alt_screen` | `SVT_FORCE_ALT_SCREEN` | `false` | Force alt screen |
 | `no_alt_screen` | `SVT_NO_ALT_SCREEN` | `false` | Disable alt screen |
 | `debug` | `SVT_DEBUG` | `false` | Debug mode |
 | `trace_worker` | `SVT_TRACE_WORKER` | `false` | Worker tracing |
 | `cell_aspect_ratio` | `SVT_CELL_ASPECT_RATIO` | `2.0` | Cell aspect ratio (tile grid) |
+| `resize_filter` | `SVT_RESIZE_FILTER` | `triangle` | Resize filter for single mode (nearest, triangle, lanczos3) |
+| `tile_filter` | `SVT_TILE_FILTER` | `nearest` | Resize filter for tile mode (fastest for thumbnails) |
+| `tile_threads` | `SVT_TILE_THREADS` | `4` | Tile processing thread count (1-8) |
 
 ## 🤝 Contributing
 

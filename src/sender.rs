@@ -13,6 +13,7 @@
 
 use std::collections::VecDeque;
 use std::io::{IsTerminal, Write, stdout};
+use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 
@@ -37,7 +38,7 @@ pub enum WriterRequest {
     },
     /// Transmit image bytes (KGP) and place the image in the terminal area.
     ImageTransmit {
-        encoded_chunks: Vec<Vec<u8>>,
+        encoded_chunks: Arc<Vec<Vec<u8>>>,
         area: Rect,
         kgp_id: u32,
         old_area: Option<Rect>,
@@ -317,7 +318,7 @@ impl TerminalWriter {
     }
 
     fn task_transmit(
-        encoded_chunks: Vec<Vec<u8>>,
+        encoded_chunks: Arc<Vec<Vec<u8>>>,
         area: Rect,
         kgp_id: u32,
         old_area: Option<Rect>,
@@ -345,8 +346,8 @@ impl TerminalWriter {
         chunks.push_back(delete_by_id(kgp_id, is_tmux));
 
         // Step 3: Transmit new image data
-        for enc in encoded_chunks {
-            chunks.push_back(enc);
+        for enc in encoded_chunks.iter() {
+            chunks.push_back(enc.clone());
         }
 
         // Step 4: Place new image

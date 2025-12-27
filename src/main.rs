@@ -15,6 +15,7 @@ mod app;
 mod config;
 mod fit;
 mod kgp;
+mod prefetch;
 mod sender;
 mod worker;
 
@@ -127,6 +128,10 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
     let mut was_transmitting = false;
 
     loop {
+        // Get terminal size once per iteration
+        let (term_w, term_h) = terminal::size()?;
+        let terminal_rect = Rect::new(0, 0, term_w, term_h);
+
         // Poll worker for completed renders
         app.poll_worker();
 
@@ -137,8 +142,6 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
 
         // Draw tile cursor after image transmission completes
         if was_transmitting && !transmitting_after && app.view_mode == ViewMode::Tile {
-            let (w, h) = terminal::size().unwrap_or((80, 24));
-            let terminal_rect = Rect::new(0, 0, w, h);
             app.draw_tile_cursor(terminal_rect);
         }
         was_transmitting = transmitting_before || transmitting_after;
@@ -177,8 +180,6 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
                 }
 
                 let n = count.max(1) as i32;
-                let (tw, th) = terminal::size().unwrap_or((80, 24));
-                let terminal_rect = Rect::new(0, 0, tw, th);
                 let grid = App::calculate_tile_grid(terminal_rect, cell_aspect_ratio);
 
                 match key.code {
@@ -319,34 +320,32 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
                         did_nav = true;
                     }
                     KeyCode::Char('y') => {
-                        let (w, h) = terminal::size().unwrap_or((80, 24));
                         if app.copy_path_to_clipboard() {
                             app.send_status(
                                 "Copied path to clipboard".to_string(),
-                                (w, h),
+                                (term_w, term_h),
                                 crate::sender::StatusIndicator::Ready,
                             );
                         } else {
                             app.send_status(
                                 "Failed to copy path".to_string(),
-                                (w, h),
+                                (term_w, term_h),
                                 crate::sender::StatusIndicator::Busy,
                             );
                         }
                         temp_status_until = Some(Instant::now() + TEMP_STATUS_DURATION);
                     }
                     KeyCode::Char('Y') => {
-                        let (w, h) = terminal::size().unwrap_or((80, 24));
                         if app.copy_image_to_clipboard() {
                             app.send_status(
                                 "Copied image to clipboard".to_string(),
-                                (w, h),
+                                (term_w, term_h),
                                 crate::sender::StatusIndicator::Ready,
                             );
                         } else {
                             app.send_status(
                                 "Failed to copy image".to_string(),
-                                (w, h),
+                                (term_w, term_h),
                                 crate::sender::StatusIndicator::Busy,
                             );
                         }
@@ -381,9 +380,6 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
         let allow_transmission = Instant::now() >= nav_until;
         let is_navigating = !allow_transmission;
 
-        let (w, h) = terminal::size()?;
-        let terminal_rect = Rect::new(0, 0, w, h);
-
         // Clear temporary status after timeout.
         if temp_status_until.is_some_and(|t| Instant::now() >= t) {
             temp_status_until = None;
@@ -393,12 +389,13 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
         // Update status bar only when it changes (or on resize).
         let status_now = app.status_text(terminal_rect);
         let indicator = app.status_indicator(terminal_rect, allow_transmission);
-        let should_draw =
-            status_now != last_status || (w, h) != last_size || indicator != last_indicator;
+        let should_draw = status_now != last_status
+            || (term_w, term_h) != last_size
+            || indicator != last_indicator;
         if should_draw && temp_status_until.is_none() {
-            app.send_status(status_now.clone(), (w, h), indicator);
+            app.send_status(status_now.clone(), (term_w, term_h), indicator);
             last_status = status_now;
-            last_size = (w, h);
+            last_size = (term_w, term_h);
             last_indicator = indicator;
         }
 

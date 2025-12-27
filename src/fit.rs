@@ -3,7 +3,7 @@
 
 //! Fit mode and view mode selection.
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum FitMode {
     #[default]
     Normal,

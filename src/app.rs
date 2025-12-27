@@ -11,7 +11,9 @@
 //!
 //! Most methods are intentionally non-blocking; heavy work is pushed to the worker/writer.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -20,16 +22,27 @@ use ratatui_image::picker::Picker;
 use crate::config::Config;
 use crate::fit::{FitMode, ViewMode};
 use crate::kgp::KgpState;
+use crate::prefetch::{PrefetchRequest, PrefetchWorker};
 use crate::sender::{StatusIndicator, TerminalWriter, WriterRequest, WriterResultKind};
 use crate::worker::{ImageRequest, ImageWorker};
 
+/// Cache key for rendered images: (path, target_size, fit_mode)
+pub type CacheKey = (PathBuf, (u32, u32), FitMode);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PrefetchSignature {
+    view_mode: ViewMode,
+    fit_mode: FitMode,
+    target: (u32, u32),
+    prefetch_count: usize,
+    anchor: usize,
+    grid: Option<(usize, usize)>,
+}
+
 pub struct RenderedImage {
-    pub path: PathBuf,
-    pub target: (u32, u32),
-    pub fit_mode: FitMode,
     pub original_size: (u32, u32),
     pub actual_size: (u32, u32),
-    pub encoded_chunks: Vec<Vec<u8>>,
+    pub encoded_chunks: Arc<Vec<Vec<u8>>>,
 }
 
 pub struct App {
@@ -44,9 +57,11 @@ pub struct App {
     pub kgp_state: KgpState,
     config: Config,
     worker: ImageWorker,
+    prefetch_worker: PrefetchWorker,
     writer: TerminalWriter,
-    pending_request: Option<(PathBuf, (u32, u32), FitMode)>,
-    render_cache: Vec<RenderedImage>,
+    pending_request: Option<CacheKey>,
+    render_cache: HashMap<CacheKey, RenderedImage>,
+    render_cache_order: VecDeque<CacheKey>,
     render_cache_limit: usize,
     kgp_id: u32,
     in_flight_transmit: bool,
@@ -54,6 +69,7 @@ pub struct App {
     render_epoch: u64,
     clear_after_nav: bool,
     is_tmux: bool,
+    last_prefetch_signature: Option<PrefetchSignature>,
 }
 
 pub fn is_tmux_env() -> bool {
@@ -79,6 +95,8 @@ impl App {
 
         let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::from_fontsize((8, 16)));
         let render_cache_limit = config.render_cache_size;
+        let prefetch_threads = config.prefetch_threads;
+        let tile_threads = config.tile_threads;
         let kgp_id = Self::generate_kgp_id();
         let app = App {
             images,
@@ -91,10 +109,12 @@ impl App {
             prev_tile_cursor: None,
             kgp_state: KgpState::default(),
             config,
-            worker: ImageWorker::new(),
+            worker: ImageWorker::new(tile_threads),
+            prefetch_worker: PrefetchWorker::new(prefetch_threads),
             writer: TerminalWriter::new(),
             pending_request: None,
-            render_cache: Vec::with_capacity(render_cache_limit),
+            render_cache: HashMap::with_capacity(render_cache_limit),
+            render_cache_order: VecDeque::with_capacity(render_cache_limit),
             render_cache_limit,
             kgp_id,
             in_flight_transmit: false,
@@ -102,6 +122,7 @@ impl App {
             render_epoch: 0,
             clear_after_nav: false,
             is_tmux,
+            last_prefetch_signature: None,
         };
 
         // Clear any stale terminal-side image cache at startup.
@@ -266,8 +287,11 @@ impl App {
     pub fn reload(&mut self) {
         self.cancel_image_output();
         self.render_cache.clear();
+        self.render_cache_order.clear();
         self.pending_request = None;
         self.kgp_state = KgpState::default();
+        self.prefetch_worker.cancel();
+        self.last_prefetch_signature = None;
     }
 
     /// Handle terminal resize: clear display and force re-render.
@@ -276,8 +300,11 @@ impl App {
         self.clear_kgp_overlay();
         // Clear render cache (images need re-rendering at new size)
         self.render_cache.clear();
+        self.render_cache_order.clear();
         self.pending_request = None;
         self.kgp_state = KgpState::default();
+        self.prefetch_worker.cancel();
+        self.last_prefetch_signature = None;
     }
 
     /// Navigate to index, updating both current_index and tile_cursor.
@@ -294,6 +321,9 @@ impl App {
 
     fn invalidate_render(&mut self) {
         self.pending_request = None;
+        // Cancel in-flight prefetch requests
+        self.prefetch_worker.cancel();
+        self.last_prefetch_signature = None;
         // Note: Do NOT clear in_flight_transmit here.
         // cancel_image_output() needs it to invalidate the correct cache entry.
     }
@@ -335,30 +365,72 @@ impl App {
     }
 
     pub fn poll_worker(&mut self) {
+        // Poll main worker
         while let Some(result) = self.worker.try_recv() {
-            if self.pending_request.as_ref().is_some_and(|(p, t, f)| {
-                p == &result.path && *t == result.target && *f == result.fit_mode
-            }) {
+            let key: CacheKey = (result.path, result.target, result.fit_mode);
+            if self.pending_request.as_ref() == Some(&key) {
                 self.pending_request = None;
             }
-            // Add to cache (LRU: remove existing entry for same path+target, add to end)
-            self.render_cache.retain(|r| {
-                !(r.path == result.path
-                    && r.target == result.target
-                    && r.fit_mode == result.fit_mode)
-            });
-            if self.render_cache.len() >= self.render_cache_limit {
-                self.render_cache.remove(0);
-            }
-            self.render_cache.push(RenderedImage {
-                path: result.path,
-                target: result.target,
-                fit_mode: result.fit_mode,
-                original_size: result.original_size,
-                actual_size: result.actual_size,
-                encoded_chunks: result.encoded_chunks,
-            });
+            self.insert_to_cache(
+                key,
+                result.original_size,
+                result.actual_size,
+                result.encoded_chunks,
+            );
         }
+
+        // Poll prefetch worker
+        while let Some(result) = self.prefetch_worker.try_recv() {
+            let key: CacheKey = (result.path, result.target, result.fit_mode);
+            // Skip if already in cache (main worker result takes precedence)
+            if !self.render_cache.contains_key(&key) {
+                self.insert_to_cache(
+                    key,
+                    result.original_size,
+                    result.actual_size,
+                    result.encoded_chunks,
+                );
+            }
+        }
+    }
+
+    fn insert_to_cache(
+        &mut self,
+        key: CacheKey,
+        original_size: (u32, u32),
+        actual_size: (u32, u32),
+        encoded_chunks: Arc<Vec<Vec<u8>>>,
+    ) {
+        // Add to cache with LRU management
+        if self.render_cache.contains_key(&key) {
+            // Move to end of LRU order
+            self.render_cache_order.retain(|k| k != &key);
+        } else if self.render_cache.len() >= self.render_cache_limit {
+            // Evict oldest entry
+            if let Some(oldest_key) = self.render_cache_order.pop_front() {
+                self.render_cache.remove(&oldest_key);
+            }
+        }
+        self.render_cache_order.push_back(key.clone());
+        self.render_cache.insert(
+            key,
+            RenderedImage {
+                original_size,
+                actual_size,
+                encoded_chunks,
+            },
+        );
+    }
+
+    fn touch_render_cache(&mut self, key: &CacheKey) {
+        if matches!(self.render_cache_order.back(), Some(k) if k == key) {
+            return;
+        }
+        if !self.render_cache.contains_key(key) {
+            return;
+        }
+        self.render_cache_order.retain(|k| k != key);
+        self.render_cache_order.push_back(key.clone());
     }
 
     pub fn poll_writer(&mut self) {
@@ -422,11 +494,8 @@ impl App {
             }
         };
 
-        let Some(rendered) = self
-            .render_cache
-            .iter()
-            .find(|r| r.path == cache_path && r.target == target && r.fit_mode == self.fit_mode)
-        else {
+        let key = (cache_path, target, self.fit_mode);
+        let Some(rendered) = self.render_cache.get(&key) else {
             return StatusIndicator::Busy;
         };
 
@@ -527,15 +596,13 @@ impl App {
         let target = (max_w_px, max_h_px);
 
         // Check if we have a cached rendered result
-        let cached_idx = self
+        let key = (path.clone(), target, self.fit_mode);
+        if let Some((actual_size, encoded_chunks)) = self
             .render_cache
-            .iter()
-            .position(|r| r.path == path && r.target == target && r.fit_mode == self.fit_mode);
-        if let Some(idx) = cached_idx {
-            let (actual_size, encoded_chunks) = {
-                let rendered = &self.render_cache[idx];
-                (rendered.actual_size, rendered.encoded_chunks.clone())
-            };
+            .get(&key)
+            .map(|rendered| (rendered.actual_size, Arc::clone(&rendered.encoded_chunks)))
+        {
+            self.touch_render_cache(&key);
 
             // Calculate area for placement based on actual image size
             let cells_w = actual_size.0.div_ceil(u32::from(cell_w));
@@ -587,6 +654,8 @@ impl App {
         }
 
         // Request from worker if not already pending
+        let resize_filter = crate::config::parse_filter_type(&self.config.resize_filter);
+        let tile_filter = crate::config::parse_filter_type(&self.config.tile_filter);
         let pending_key = (path, target, self.fit_mode);
         if self.pending_request.as_ref() != Some(&pending_key) {
             self.worker.request(ImageRequest {
@@ -598,10 +667,12 @@ impl App {
                 compress_level: self.config.compression_level(),
                 tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
                 trace_worker: self.config.trace_worker,
+                resize_filter,
                 view_mode: ViewMode::Single,
                 tile_paths: None,
                 tile_grid: None,
                 cell_size: None,
+                tile_filter,
             });
             self.pending_request = Some(pending_key);
         }
@@ -640,19 +711,16 @@ impl App {
         }
 
         // Use a synthetic path for tile cache key (cursor is drawn via ANSI overlay, not part of cache)
-        let cache_key = PathBuf::from(format!("__tile_page_{}", page_start));
+        let cache_path = PathBuf::from(format!("__tile_page_{}", page_start));
+        let key = (cache_path.clone(), target, self.fit_mode);
 
         // Check cache
-        let cached_idx = self
+        if let Some((actual_size, encoded_chunks)) = self
             .render_cache
-            .iter()
-            .position(|r| r.path == cache_key && r.target == target && r.fit_mode == self.fit_mode);
-
-        if let Some(idx) = cached_idx {
-            let (actual_size, encoded_chunks) = {
-                let rendered = &self.render_cache[idx];
-                (rendered.actual_size, rendered.encoded_chunks.clone())
-            };
+            .get(&key)
+            .map(|rendered| (rendered.actual_size, Arc::clone(&rendered.encoded_chunks)))
+        {
+            self.touch_render_cache(&key);
 
             let cells_w = actual_size.0.div_ceil(u32::from(cell_w));
             let cells_h = actual_size.1.div_ceil(u32::from(cell_h));
@@ -694,10 +762,11 @@ impl App {
         }
 
         // Request tile composite from worker (cursor is drawn via ANSI overlay)
-        let pending_key = (cache_key.clone(), target, self.fit_mode);
-        if self.pending_request.as_ref() != Some(&pending_key) {
+        let resize_filter = crate::config::parse_filter_type(&self.config.resize_filter);
+        let tile_filter = crate::config::parse_filter_type(&self.config.tile_filter);
+        if self.pending_request.as_ref() != Some(&key) {
             self.worker.request(ImageRequest {
-                path: cache_key,
+                path: cache_path,
                 target,
                 fit_mode: self.fit_mode,
                 kgp_id: self.kgp_id,
@@ -705,12 +774,14 @@ impl App {
                 compress_level: self.config.compression_level(),
                 tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
                 trace_worker: self.config.trace_worker,
+                resize_filter,
                 view_mode: ViewMode::Tile,
                 tile_paths: Some(tile_paths),
                 tile_grid: Some(grid),
                 cell_size: Some((cell_w, cell_h)),
+                tile_filter,
             });
-            self.pending_request = Some(pending_key);
+            self.pending_request = Some(key);
         }
     }
 
@@ -736,6 +807,7 @@ impl App {
     }
 
     /// Prefetch next/previous images in Single mode (with wrap-around).
+    /// Uses dedicated PrefetchWorker for parallel processing.
     fn prefetch_adjacent_single(&mut self, terminal_size: Rect) {
         let image_area = Self::image_area(terminal_size);
         let (cell_w, cell_h) = self.picker.font_size();
@@ -752,43 +824,57 @@ impl App {
             return;
         }
 
-        // Build list of indices: next images first, then previous images
+        // Build list of indices: alternating next/previous (+1, -1, +2, -2, ...)
         let prefetch_count = self.prefetch_count();
+        let signature = PrefetchSignature {
+            view_mode: ViewMode::Single,
+            fit_mode: self.fit_mode,
+            target,
+            prefetch_count,
+            anchor: self.current_index,
+            grid: None,
+        };
+        if self.last_prefetch_signature == Some(signature) {
+            return;
+        }
         let mut indices = Vec::with_capacity(prefetch_count * 2);
         for i in 1..=prefetch_count {
             indices.push((self.current_index + i) % len);
-        }
-        for i in 1..=prefetch_count {
             indices.push((self.current_index + len - i) % len);
         }
 
+        // Collect paths that need prefetching
+        let mut seen = HashSet::with_capacity(indices.len());
+        let mut paths = Vec::new();
         for idx in indices {
-            let path = &self.images[idx];
-
-            let in_cache = self
-                .render_cache
-                .iter()
-                .any(|r| &r.path == path && r.target == target && r.fit_mode == self.fit_mode);
-            if in_cache {
+            if !seen.insert(idx) {
                 continue;
             }
-
-            self.worker.request(ImageRequest {
-                path: path.clone(),
-                target,
-                fit_mode: self.fit_mode,
-                kgp_id: self.kgp_id,
-                is_tmux: self.is_tmux,
-                compress_level: self.config.compression_level(),
-                tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
-                trace_worker: self.config.trace_worker,
-                view_mode: ViewMode::Single,
-                tile_paths: None,
-                tile_grid: None,
-                cell_size: None,
-            });
-            break;
+            let path = &self.images[idx];
+            let key = (path.clone(), target, self.fit_mode);
+            if !self.render_cache.contains_key(&key) {
+                paths.push(path.clone());
+            }
         }
+
+        if paths.is_empty() {
+            return;
+        }
+
+        // Submit batch prefetch request
+        let resize_filter = crate::config::parse_filter_type(&self.config.resize_filter);
+        self.prefetch_worker.prefetch_batch(PrefetchRequest {
+            paths,
+            target,
+            fit_mode: self.fit_mode,
+            epoch: self.prefetch_worker.current_epoch(),
+            kgp_id: self.kgp_id,
+            is_tmux: self.is_tmux,
+            compress_level: self.config.compression_level(),
+            tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
+            resize_filter,
+        });
+        self.last_prefetch_signature = Some(signature);
     }
 
     /// Prefetch next/previous pages in Tile mode (no wrap-around).
@@ -818,16 +904,25 @@ impl App {
 
         let current_page = self.tile_cursor / tiles_per_page;
         let prefetch_count = self.prefetch_count();
+        let signature = PrefetchSignature {
+            view_mode: ViewMode::Tile,
+            fit_mode: self.fit_mode,
+            target,
+            prefetch_count,
+            anchor: current_page,
+            grid: Some(grid),
+        };
+        if self.last_prefetch_signature == Some(signature) {
+            return;
+        }
 
-        // Build list of page indices: next pages first, then previous pages
+        // Build list of page indices: alternating next/previous (+1, -1, +2, -2, ...)
         let mut page_indices = Vec::with_capacity(prefetch_count * 2);
         for i in 1..=prefetch_count {
             let next_page = current_page + i;
             if next_page < total_pages {
                 page_indices.push(next_page);
             }
-        }
-        for i in 1..=prefetch_count {
             if current_page >= i {
                 page_indices.push(current_page - i);
             }
@@ -835,13 +930,10 @@ impl App {
 
         for page in page_indices {
             let page_start = page * tiles_per_page;
-            let cache_key = PathBuf::from(format!("__tile_page_{}", page_start));
+            let cache_path = PathBuf::from(format!("__tile_page_{}", page_start));
+            let key = (cache_path.clone(), target, self.fit_mode);
 
-            let in_cache = self
-                .render_cache
-                .iter()
-                .any(|r| r.path == cache_key && r.target == target && r.fit_mode == self.fit_mode);
-            if in_cache {
+            if self.render_cache.contains_key(&key) {
                 continue;
             }
 
@@ -857,8 +949,10 @@ impl App {
                 continue;
             }
 
+            let resize_filter = crate::config::parse_filter_type(&self.config.resize_filter);
+            let tile_filter = crate::config::parse_filter_type(&self.config.tile_filter);
             self.worker.request(ImageRequest {
-                path: cache_key,
+                path: cache_path,
                 target,
                 fit_mode: self.fit_mode,
                 kgp_id: self.kgp_id,
@@ -866,11 +960,14 @@ impl App {
                 compress_level: self.config.compression_level(),
                 tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
                 trace_worker: self.config.trace_worker,
+                resize_filter,
                 view_mode: ViewMode::Tile,
                 tile_paths: Some(tile_paths),
                 tile_grid: Some(grid),
                 cell_size: Some((cell_w, cell_h)),
+                tile_filter,
             });
+            self.last_prefetch_signature = Some(signature);
             break;
         }
     }
@@ -936,10 +1033,11 @@ impl App {
     /// Get the original resolution of the current image from cache.
     fn current_image_resolution(&self) -> Option<(u32, u32)> {
         let path = self.current_path()?;
+        // Search by path in cache keys
         self.render_cache
             .iter()
-            .find(|r| &r.path == path)
-            .map(|r| r.original_size)
+            .find(|(k, _)| &k.0 == path)
+            .map(|(_, v)| v.original_size)
     }
 
     pub fn status_text(&self, terminal_size: Rect) -> String {
@@ -1012,6 +1110,7 @@ mod tests {
         let images: Vec<PathBuf> = (0..image_count)
             .map(|i| PathBuf::from(format!("test{}.png", i)))
             .collect();
+        let config = Config::default();
         App {
             images,
             current_index: 0,
@@ -1022,11 +1121,13 @@ mod tests {
             tile_cursor: 0,
             prev_tile_cursor: None,
             kgp_state: KgpState::default(),
-            config: Config::default(),
-            worker: ImageWorker::new(),
+            worker: ImageWorker::new(config.tile_threads),
+            prefetch_worker: PrefetchWorker::new(config.prefetch_threads),
+            config,
             writer: TerminalWriter::new(),
             pending_request: None,
-            render_cache: Vec::new(),
+            render_cache: HashMap::new(),
+            render_cache_order: VecDeque::new(),
             render_cache_limit: 5,
             kgp_id: App::generate_kgp_id(),
             in_flight_transmit: false,
@@ -1034,6 +1135,7 @@ mod tests {
             render_epoch: 0,
             clear_after_nav: false,
             is_tmux: false,
+            last_prefetch_signature: None,
         }
     }
 
@@ -1115,14 +1217,16 @@ mod tests {
     #[test]
     fn test_reload_clears_cache() {
         let mut app = create_test_app(2);
-        app.render_cache.push(RenderedImage {
-            path: PathBuf::from("x.png"),
-            target: (1, 1),
-            fit_mode: FitMode::Normal,
-            original_size: (100, 100),
-            actual_size: (1, 1),
-            encoded_chunks: vec![b"x".to_vec()],
-        });
+        let key: CacheKey = (PathBuf::from("x.png"), (1, 1), FitMode::Normal);
+        app.render_cache.insert(
+            key.clone(),
+            RenderedImage {
+                original_size: (100, 100),
+                actual_size: (1, 1),
+                encoded_chunks: Arc::new(vec![b"x".to_vec()]),
+            },
+        );
+        app.render_cache_order.push_back(key);
         app.pending_request = Some((PathBuf::from("y.png"), (1, 1), FitMode::Normal));
         app.in_flight_transmit = true;
 
