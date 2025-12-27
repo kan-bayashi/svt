@@ -18,7 +18,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui_image::picker::Picker;
 
 use crate::config::Config;
-use crate::fit::FitMode;
+use crate::fit::{FitMode, ViewMode};
 use crate::kgp::KgpState;
 use crate::sender::{StatusIndicator, TerminalWriter, WriterRequest, WriterResultKind};
 use crate::worker::{ImageRequest, ImageWorker};
@@ -38,6 +38,9 @@ pub struct App {
     pub picker: Picker,
     pub should_quit: bool,
     pub fit_mode: FitMode,
+    pub view_mode: ViewMode,
+    pub tile_cursor: usize,
+    prev_tile_cursor: Option<usize>,
     pub kgp_state: KgpState,
     config: Config,
     worker: ImageWorker,
@@ -83,6 +86,9 @@ impl App {
             picker,
             should_quit: false,
             fit_mode: FitMode::Normal,
+            view_mode: ViewMode::default(),
+            tile_cursor: 0,
+            prev_tile_cursor: None,
             kgp_state: KgpState::default(),
             config,
             worker: ImageWorker::new(),
@@ -150,6 +156,108 @@ impl App {
         self.invalidate_render();
     }
 
+    /// Toggle between `Single` and `Tile` view modes.
+    pub fn toggle_view_mode(&mut self) {
+        match self.view_mode {
+            ViewMode::Single => {
+                // Entering tile mode: set cursor to current image position in page
+                self.view_mode = ViewMode::Tile;
+                // tile_cursor is the absolute position in the image list
+                self.tile_cursor = self.current_index;
+            }
+            ViewMode::Tile => {
+                // Exiting tile mode: set current_index to cursor position
+                self.current_index = self.tile_cursor;
+                self.view_mode = ViewMode::Single;
+            }
+        }
+        self.invalidate_render();
+    }
+
+    /// Move tile cursor by delta (wraps around).
+    /// Returns true if page changed (requires re-render), false if only cursor moved.
+    pub fn move_tile_cursor(&mut self, delta: i32, grid: (usize, usize)) -> bool {
+        if self.images.is_empty() {
+            return false;
+        }
+        let (cols, rows) = grid;
+        let tiles_per_page = cols * rows;
+        if tiles_per_page == 0 {
+            return false;
+        }
+
+        let old_page = self.tile_cursor / tiles_per_page;
+        self.prev_tile_cursor = Some(self.tile_cursor);
+
+        let len = self.images.len() as i32;
+        self.tile_cursor = (self.tile_cursor as i32 + delta).rem_euclid(len) as usize;
+
+        let new_page = self.tile_cursor / tiles_per_page;
+        let page_changed = old_page != new_page;
+
+        if page_changed {
+            self.invalidate_render();
+        }
+        page_changed
+    }
+
+    /// Move tile cursor to next/prev row.
+    /// Returns true if page changed.
+    pub fn move_tile_cursor_row(&mut self, delta: i32, grid: (usize, usize)) -> bool {
+        let (cols, _) = grid;
+        self.move_tile_cursor(delta * cols as i32, grid)
+    }
+
+    /// Move tile page (Shift+H/J/K/L).
+    /// After page change, cursor moves to the first tile of the new page.
+    pub fn move_tile_page(&mut self, delta: i32, grid: (usize, usize)) {
+        let (cols, rows) = grid;
+        let tiles_per_page = cols * rows;
+        let len = self.images.len();
+        if len == 0 || tiles_per_page == 0 {
+            return;
+        }
+
+        let current_page = self.tile_cursor / tiles_per_page;
+        let max_page = (len - 1) / tiles_per_page;
+        let new_page = (current_page as i32 + delta).clamp(0, max_page as i32) as usize;
+
+        if new_page == current_page {
+            return;
+        }
+
+        self.prev_tile_cursor = Some(self.tile_cursor);
+        self.tile_cursor = new_page * tiles_per_page;
+        self.invalidate_render();
+    }
+
+    /// Draw tile cursor via ANSI overlay (fast, no image re-render).
+    pub fn draw_tile_cursor(&self, terminal_size: Rect) {
+        let grid = Self::calculate_tile_grid(terminal_size, self.config.cell_aspect_ratio);
+        let image_area = Self::image_area(terminal_size);
+        let (cols, rows) = grid;
+        let tiles_per_page = cols * rows;
+        if tiles_per_page == 0 {
+            return;
+        }
+        let cursor_in_page = self.tile_cursor % tiles_per_page;
+        let prev_cursor_in_page = self.prev_tile_cursor.map(|prev| prev % tiles_per_page);
+
+        self.writer.send(WriterRequest::TileCursor {
+            grid,
+            cursor_idx: cursor_in_page,
+            image_area,
+            prev_cursor_idx: prev_cursor_in_page,
+        });
+    }
+
+    /// Select current tile and switch to Single mode.
+    pub fn select_tile(&mut self) {
+        self.current_index = self.tile_cursor;
+        self.view_mode = ViewMode::Single;
+        self.invalidate_render();
+    }
+
     /// Clear caches/state and force re-decode/re-send on the next tick.
     pub fn reload(&mut self) {
         self.cancel_image_output();
@@ -196,6 +304,31 @@ impl App {
     fn image_area(terminal_size: Rect) -> Rect {
         let full = Rect::new(0, 0, terminal_size.width, terminal_size.height);
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(full)[0]
+    }
+
+    /// Calculate optimal tile grid size based on terminal dimensions.
+    /// Returns (cols, rows) for the tile grid.
+    pub fn calculate_tile_grid(terminal_size: Rect, cell_aspect_ratio: f64) -> (usize, usize) {
+        let image_area = Self::image_area(terminal_size);
+
+        // For visually square tiles, we need to account for the cell aspect ratio.
+        // cell_aspect_ratio = cell_height_pixels / cell_width_pixels (typically ~2.0)
+        const MIN_TILE_WIDTH: u16 = 16;
+        const MAX_COLS: usize = 6;
+        const MAX_ROWS: usize = 6;
+
+        // Calculate min tile height to get visually square tiles
+        let min_tile_height = (MIN_TILE_WIDTH as f64 / cell_aspect_ratio).round() as u16;
+        let min_tile_height = min_tile_height.max(4); // Minimum 4 cells tall
+
+        let cols = (image_area.width / MIN_TILE_WIDTH) as usize;
+        let rows = (image_area.height / min_tile_height) as usize;
+
+        // Clamp to reasonable bounds
+        let cols = cols.clamp(2, MAX_COLS);
+        let rows = rows.clamp(2, MAX_ROWS);
+
+        (cols, rows)
     }
 
     pub fn poll_worker(&mut self) {
@@ -256,10 +389,6 @@ impl App {
             return StatusIndicator::Busy;
         }
 
-        let Some(path) = self.current_path() else {
-            return StatusIndicator::Busy;
-        };
-
         let image_area = Self::image_area(terminal_size);
 
         let (cell_w, cell_h) = self.picker.font_size();
@@ -271,10 +400,29 @@ impl App {
         let max_h_px = u32::from(image_area.height) * u32::from(cell_h);
         let target = (max_w_px, max_h_px);
 
+        // Get the cache key based on view mode
+        let cache_path = match self.view_mode {
+            ViewMode::Single => {
+                let Some(path) = self.current_path() else {
+                    return StatusIndicator::Busy;
+                };
+                path.clone()
+            }
+            ViewMode::Tile => {
+                let grid = Self::calculate_tile_grid(terminal_size, self.config.cell_aspect_ratio);
+                let tiles_per_page = grid.0 * grid.1;
+                if tiles_per_page == 0 {
+                    return StatusIndicator::Busy;
+                }
+                let page_start = (self.tile_cursor / tiles_per_page) * tiles_per_page;
+                PathBuf::from(format!("__tile_page_{}", page_start))
+            }
+        };
+
         let Some(rendered) = self
             .render_cache
             .iter()
-            .find(|r| &r.path == path && r.target == target && r.fit_mode == self.fit_mode)
+            .find(|r| r.path == cache_path && r.target == target && r.fit_mode == self.fit_mode)
         else {
             return StatusIndicator::Busy;
         };
@@ -299,7 +447,16 @@ impl App {
             return StatusIndicator::Busy;
         }
 
-        StatusIndicator::Ready
+        match self.view_mode {
+            ViewMode::Single => {
+                if self.fit_mode == FitMode::Fit {
+                    StatusIndicator::Fit
+                } else {
+                    StatusIndicator::Ready
+                }
+            }
+            ViewMode::Tile => StatusIndicator::Tile,
+        }
     }
 
     /// Send the status row to the writer thread.
@@ -337,15 +494,22 @@ impl App {
     ///
     /// When `allow_transmission` is false (navigation latch), this method does nothing to keep UX snappy.
     pub fn prepare_render_request(&mut self, terminal_size: Rect, allow_transmission: bool) {
-        let Some(path) = self.current_path().cloned() else {
-            return;
-        };
-
         // Navigation/scrolling: do not do any image work (decode/resize/transmit/place).
         // This keeps status bar updates responsive by avoiding both stdout contention and CPU load.
         if !allow_transmission {
             return;
         }
+
+        match self.view_mode {
+            ViewMode::Single => self.prepare_single_render(terminal_size),
+            ViewMode::Tile => self.prepare_tile_render(terminal_size),
+        }
+    }
+
+    fn prepare_single_render(&mut self, terminal_size: Rect) {
+        let Some(path) = self.current_path().cloned() else {
+            return;
+        };
 
         let old_area = self.kgp_state.last_area();
         let image_area = Self::image_area(terminal_size);
@@ -431,6 +595,117 @@ impl App {
                 compress_level: self.config.compression_level(),
                 tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
                 trace_worker: self.config.trace_worker,
+                view_mode: ViewMode::Single,
+                tile_paths: None,
+                tile_grid: None,
+                cell_size: None,
+            });
+            self.pending_request = Some(pending_key);
+        }
+    }
+
+    fn prepare_tile_render(&mut self, terminal_size: Rect) {
+        let old_area = self.kgp_state.last_area();
+        let image_area = Self::image_area(terminal_size);
+
+        let (cell_w, cell_h) = self.picker.font_size();
+        if cell_w == 0 || cell_h == 0 || image_area.width == 0 || image_area.height == 0 {
+            return;
+        }
+
+        let grid = Self::calculate_tile_grid(terminal_size, self.config.cell_aspect_ratio);
+        let (cols, rows) = grid;
+
+        // Calculate canvas size in pixels
+        let max_w_px = u32::from(image_area.width) * u32::from(cell_w);
+        let max_h_px = u32::from(image_area.height) * u32::from(cell_h);
+        let target = (max_w_px, max_h_px);
+
+        // Get tile paths for current page
+        let tiles_per_page = cols * rows;
+        let page_start = (self.tile_cursor / tiles_per_page) * tiles_per_page;
+        let tile_paths: Vec<PathBuf> = self
+            .images
+            .iter()
+            .skip(page_start)
+            .take(tiles_per_page)
+            .cloned()
+            .collect();
+
+        if tile_paths.is_empty() {
+            return;
+        }
+
+        // Use a synthetic path for tile cache key (cursor is drawn via ANSI overlay, not part of cache)
+        let cache_key = PathBuf::from(format!("__tile_page_{}", page_start));
+
+        // Check cache
+        let cached_idx = self
+            .render_cache
+            .iter()
+            .position(|r| r.path == cache_key && r.target == target && r.fit_mode == self.fit_mode);
+
+        if let Some(idx) = cached_idx {
+            let (actual_size, encoded_chunks) = {
+                let rendered = &self.render_cache[idx];
+                (rendered.actual_size, rendered.encoded_chunks.clone())
+            };
+
+            let cells_w = actual_size.0.div_ceil(u32::from(cell_w));
+            let cells_h = actual_size.1.div_ceil(u32::from(cell_h));
+            let cells_w = cells_w.min(u32::from(image_area.width)) as u16;
+            let cells_h = cells_h.min(u32::from(image_area.height)) as u16;
+            let area = Rect::new(image_area.x, image_area.y, cells_w, cells_h);
+
+            if self.kgp_state.last_area() == Some(area)
+                && self.kgp_state.last_kgp_id() == Some(self.kgp_id)
+            {
+                return;
+            }
+            if self.pending_display == Some(area) {
+                return;
+            }
+
+            if self.in_flight_transmit {
+                return;
+            }
+            self.in_flight_transmit = true;
+            if self.clear_after_nav {
+                self.writer.send(WriterRequest::ClearAll {
+                    area: None,
+                    is_tmux: self.is_tmux,
+                });
+                self.clear_after_nav = false;
+            }
+
+            self.writer.send(WriterRequest::ImageTransmit {
+                encoded_chunks,
+                area,
+                kgp_id: self.kgp_id,
+                old_area,
+                epoch: self.render_epoch,
+                is_tmux: self.is_tmux,
+            });
+            self.pending_display = Some(area);
+            return;
+        }
+
+        // Request tile composite from worker (cursor is drawn via ANSI overlay)
+        let pending_key = (cache_key.clone(), target, self.fit_mode);
+        if self.pending_request.as_ref() != Some(&pending_key) {
+            self.worker.request(ImageRequest {
+                path: cache_key,
+                target,
+                fit_mode: self.fit_mode,
+                kgp_id: self.kgp_id,
+                is_tmux: self.is_tmux,
+                compress_level: self.config.compression_level(),
+                tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
+                trace_worker: self.config.trace_worker,
+                view_mode: ViewMode::Tile,
+                tile_paths: Some(tile_paths),
+                tile_grid: Some(grid),
+                cell_size: Some((cell_w, cell_h)),
             });
             self.pending_request = Some(pending_key);
         }
@@ -500,6 +775,10 @@ impl App {
                 compress_level: self.config.compression_level(),
                 tmux_kitty_max_pixels: self.config.tmux_kitty_max_pixels,
                 trace_worker: self.config.trace_worker,
+                view_mode: ViewMode::Single,
+                tile_paths: None,
+                tile_grid: None,
+                cell_size: None,
             });
             // Only prefetch one at a time to avoid overwhelming the worker
             break;
@@ -573,47 +852,59 @@ impl App {
             .map(|r| r.original_size)
     }
 
-    pub fn status_text(&self) -> String {
+    pub fn status_text(&self, terminal_size: Rect) -> String {
         // Nerdfont icons
         const ICON_IMAGE: &str = "\u{e60d}"; //  (nf-seti-image)
-        const ICON_FIT: &str = "\u{f004c} "; //  (nf-md-arrow_expand_all)
-        const ICON_NORMAL: &str = "";
         const SEP: &str = "\u{e0b1}"; //  (Powerline separator)
 
-        let fit_icon = if self.fit_mode == FitMode::Fit {
-            ICON_FIT
-        } else {
-            ICON_NORMAL
-        };
+        match self.view_mode {
+            ViewMode::Single => {
+                // terminal_size is only used in Tile mode for grid calculation
+                let resolution = self
+                    .current_image_resolution()
+                    .map(|(w, h)| format!(" [{w}x{h}]"))
+                    .unwrap_or_default();
 
-        let resolution = self
-            .current_image_resolution()
-            .map(|(w, h)| format!(" [{w}x{h}]"))
-            .unwrap_or_default();
+                let mut status = format!(
+                    "{}/{} {} {} {}{}",
+                    self.current_index + 1,
+                    self.images.len(),
+                    SEP,
+                    ICON_IMAGE,
+                    self.current_image_name(),
+                    resolution,
+                );
 
-        let mut status = format!(
-            "{}{}/{} {} {} {}{}",
-            fit_icon,
-            self.current_index + 1,
-            self.images.len(),
-            SEP,
-            ICON_IMAGE,
-            self.current_image_name(),
-            resolution,
-        );
+                if self.config.debug {
+                    if self.is_tmux {
+                        status.push_str(" tmux");
+                    }
+                    status.push_str(&format!(
+                        " caps:{:?} cell:{:?}",
+                        self.picker.capabilities(),
+                        self.picker.font_size(),
+                    ));
+                }
 
-        if self.config.debug {
-            if self.is_tmux {
-                status.push_str(" tmux");
+                status
             }
-            status.push_str(&format!(
-                " caps:{:?} cell:{:?}",
-                self.picker.capabilities(),
-                self.picker.font_size(),
-            ));
+            ViewMode::Tile => {
+                let grid = Self::calculate_tile_grid(terminal_size, self.config.cell_aspect_ratio);
+                let (cols, rows) = grid;
+                let tiles_per_page = cols * rows;
+                let page_start = (self.tile_cursor / tiles_per_page) * tiles_per_page;
+                let page_end = (page_start + tiles_per_page).min(self.images.len());
+                format!(
+                    "[{}-{}/{}] {} {}x{} Grid",
+                    page_start + 1,
+                    page_end,
+                    self.images.len(),
+                    SEP,
+                    cols,
+                    rows
+                )
+            }
         }
-
-        status
     }
 }
 
@@ -631,6 +922,9 @@ mod tests {
             picker: Picker::from_fontsize((8, 16)),
             should_quit: false,
             fit_mode: FitMode::Normal,
+            view_mode: ViewMode::default(),
+            tile_cursor: 0,
+            prev_tile_cursor: None,
             kgp_state: KgpState::default(),
             config: Config::default(),
             worker: ImageWorker::new(),
@@ -682,7 +976,8 @@ mod tests {
     #[test]
     fn test_status_text() {
         let app = create_test_app(3);
-        let status = app.status_text();
+        let terminal = Rect::new(0, 0, 80, 24);
+        let status = app.status_text(terminal);
         // New format: "{fit_icon} 1/3  {image_icon} test0.png"
         assert!(status.contains("1/3"));
         assert!(status.contains("test0.png"));

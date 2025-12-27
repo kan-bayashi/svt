@@ -26,7 +26,7 @@ use std::{
 use anyhow::Result;
 use clap::Parser;
 use ratatui::crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
     terminal,
 };
 use ratatui::layout::Rect;
@@ -34,6 +34,7 @@ use ratatui::layout::Rect;
 use crate::app::App;
 use crate::app::is_tmux_env;
 use crate::config::Config;
+use crate::fit::ViewMode;
 
 #[derive(Parser, Debug)]
 #[command(name = "svt", about = "Simple Viewer in Terminal")]
@@ -115,6 +116,7 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
     use std::time::Instant;
 
     let nav_latch = Duration::from_millis(config.nav_latch_ms);
+    let cell_aspect_ratio = config.cell_aspect_ratio;
     let mut app = App::new(images, config)?;
     let mut nav_until = Instant::now() - Duration::from_secs(1);
     let mut count: u32 = 0;
@@ -122,13 +124,24 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
     let mut last_size: (u16, u16) = (0, 0);
     let mut last_indicator = crate::sender::StatusIndicator::Busy;
     let mut temp_status_until: Option<Instant> = None;
+    let mut was_transmitting = false;
 
     loop {
         // Poll worker for completed renders
         app.poll_worker();
 
         // Poll writer for completed renders
+        let transmitting_before = app.is_transmitting();
         app.poll_writer();
+        let transmitting_after = app.is_transmitting();
+
+        // Draw tile cursor after image transmission completes
+        if was_transmitting && !transmitting_after && app.view_mode == ViewMode::Tile {
+            let (w, h) = terminal::size().unwrap_or((80, 24));
+            let terminal_rect = Rect::new(0, 0, w, h);
+            app.draw_tile_cursor(terminal_rect);
+        }
+        was_transmitting = transmitting_before || transmitting_after;
 
         // Process all pending key events first (drain the queue)
         while event::poll(Duration::ZERO)? {
@@ -151,23 +164,135 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
                 }
 
                 let n = count.max(1) as i32;
+                let (tw, th) = terminal::size().unwrap_or((80, 24));
+                let terminal_rect = Rect::new(0, 0, tw, th);
+                let grid = App::calculate_tile_grid(terminal_rect, cell_aspect_ratio);
+                let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+
                 match key.code {
                     KeyCode::Char('q') => app.should_quit = true,
-                    KeyCode::Char('j') | KeyCode::Char(' ') => {
-                        app.move_by(n);
-                        did_nav = true;
-                    }
-                    KeyCode::Char('k') | KeyCode::Backspace => {
-                        app.move_by(-n);
-                        did_nav = true;
-                    }
-                    KeyCode::Char('h') => {
-                        app.move_by(-n);
-                        did_nav = true;
-                    }
-                    KeyCode::Char('l') => {
-                        app.move_by(n);
-                        did_nav = true;
+                    KeyCode::Char('j') | KeyCode::Char(' ') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            if shift {
+                                app.move_tile_page(n, grid);
+                                did_nav = true;
+                            } else {
+                                let page_changed = app.move_tile_cursor_row(n, grid);
+                                if page_changed {
+                                    did_nav = true;
+                                } else {
+                                    app.draw_tile_cursor(terminal_rect);
+                                }
+                            }
+                        }
+                    },
+                    KeyCode::Char('k') | KeyCode::Backspace => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(-n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            if shift {
+                                app.move_tile_page(-n, grid);
+                                did_nav = true;
+                            } else {
+                                let page_changed = app.move_tile_cursor_row(-n, grid);
+                                if page_changed {
+                                    did_nav = true;
+                                } else {
+                                    app.draw_tile_cursor(terminal_rect);
+                                }
+                            }
+                        }
+                    },
+                    KeyCode::Char('h') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(-n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            if shift {
+                                app.move_tile_page(-n, grid);
+                                did_nav = true;
+                            } else {
+                                let page_changed = app.move_tile_cursor(-n, grid);
+                                if page_changed {
+                                    did_nav = true;
+                                } else {
+                                    app.draw_tile_cursor(terminal_rect);
+                                }
+                            }
+                        }
+                    },
+                    KeyCode::Char('l') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            if shift {
+                                app.move_tile_page(n, grid);
+                                did_nav = true;
+                            } else {
+                                let page_changed = app.move_tile_cursor(n, grid);
+                                if page_changed {
+                                    did_nav = true;
+                                } else {
+                                    app.draw_tile_cursor(terminal_rect);
+                                }
+                            }
+                        }
+                    },
+                    // Shift+HJKL: page navigation in Tile mode, same as lowercase in Single mode
+                    KeyCode::Char('H') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(-n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            app.move_tile_page(-n, grid);
+                            did_nav = true;
+                        }
+                    },
+                    KeyCode::Char('J') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            app.move_tile_page(n, grid);
+                            did_nav = true;
+                        }
+                    },
+                    KeyCode::Char('K') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(-n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            app.move_tile_page(-n, grid);
+                            did_nav = true;
+                        }
+                    },
+                    KeyCode::Char('L') => match app.view_mode {
+                        ViewMode::Single => {
+                            app.move_by(n);
+                            did_nav = true;
+                        }
+                        ViewMode::Tile => {
+                            app.move_tile_page(n, grid);
+                            did_nav = true;
+                        }
+                    },
+                    KeyCode::Enter => {
+                        if app.view_mode == ViewMode::Tile {
+                            app.select_tile();
+                            did_nav = true;
+                        }
                     }
                     KeyCode::Char('g') => {
                         // Vim-like: `g` (or `N g`) goes to first / Nth (1-based) image.
@@ -193,6 +318,10 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
                     }
                     KeyCode::Char('r') => {
                         app.reload();
+                        did_nav = true;
+                    }
+                    KeyCode::Char('t') => {
+                        app.toggle_view_mode();
                         did_nav = true;
                     }
                     KeyCode::Char('y') => {
@@ -268,7 +397,7 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
         }
 
         // Update status bar only when it changes (or on resize).
-        let status_now = app.status_text();
+        let status_now = app.status_text(terminal_rect);
         let indicator = app.status_indicator(terminal_rect, allow_transmission);
         let should_draw =
             status_now != last_status || (w, h) != last_size || indicator != last_indicator;
@@ -284,7 +413,13 @@ fn run(images: Vec<PathBuf>, config: Config) -> Result<()> {
         app.prepare_render_request(terminal_rect, allow_transmission);
 
         // Prefetch adjacent images after current image is fully displayed.
-        if allow_transmission && indicator == crate::sender::StatusIndicator::Ready {
+        // Note: Prefetch only in Single mode (Ready or Fit states).
+        if allow_transmission
+            && matches!(
+                indicator,
+                crate::sender::StatusIndicator::Ready | crate::sender::StatusIndicator::Fit
+            )
+        {
             app.prefetch_adjacent(terminal_rect);
         }
 

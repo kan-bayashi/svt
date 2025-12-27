@@ -24,6 +24,7 @@ pub struct Config {
     pub compress_level: u32,
     pub tmux_kitty_max_pixels: u64,
     pub trace_worker: bool,
+    pub cell_aspect_ratio: f64,
 }
 
 impl Default for Config {
@@ -39,6 +40,7 @@ impl Default for Config {
             compress_level: 6,
             tmux_kitty_max_pixels: 2_000_000,
             trace_worker: false,
+            cell_aspect_ratio: 2.0,
         }
     }
 }
@@ -93,6 +95,9 @@ impl Config {
         if std::env::var_os("SVT_TRACE_WORKER").is_some() {
             self.trace_worker = true;
         }
+        if let Some(v) = Self::parse_env::<f64>("SVT_CELL_ASPECT_RATIO") {
+            self.cell_aspect_ratio = v;
+        }
     }
 
     fn clamp_values(&mut self) {
@@ -103,6 +108,7 @@ impl Config {
         self.nav_latch_ms = self.nav_latch_ms.min(MAX_NAV_LATCH_MS);
         self.render_cache_size = self.render_cache_size.clamp(1, MAX_RENDER_CACHE_SIZE);
         self.compress_level = self.compress_level.min(MAX_COMPRESS_LEVEL);
+        self.cell_aspect_ratio = self.cell_aspect_ratio.clamp(1.0, 4.0);
     }
 
     fn parse_env<T: std::str::FromStr>(key: &str) -> Option<T> {
@@ -132,6 +138,7 @@ mod tests {
         assert_eq!(config.tmux_kitty_max_pixels, 2_000_000);
         assert!(!config.force_alt_screen);
         assert!(!config.debug);
+        assert_eq!(config.cell_aspect_ratio, 2.0);
     }
 
     #[test]

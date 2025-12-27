@@ -24,6 +24,8 @@ use crate::kgp::{delete_all, delete_by_id, erase_rows, place_rows};
 pub enum StatusIndicator {
     Busy,
     Ready,
+    Fit,
+    Tile,
 }
 
 pub enum WriterRequest {
@@ -56,6 +58,13 @@ pub enum WriterRequest {
     CopyToClipboard {
         data: Vec<u8>,
         is_tmux: bool,
+    },
+    /// Draw tile cursor border (ANSI overlay).
+    TileCursor {
+        grid: (usize, usize),
+        cursor_idx: usize,
+        image_area: Rect,
+        prev_cursor_idx: Option<usize>,
     },
     Shutdown,
 }
@@ -280,6 +289,28 @@ impl TerminalWriter {
                     let _ = out.flush();
                 }
             }
+            WriterRequest::TileCursor {
+                grid,
+                cursor_idx,
+                image_area,
+                prev_cursor_idx,
+            } => {
+                if is_tty {
+                    // Clear previous cursor if different
+                    if let Some(prev_idx) = prev_cursor_idx
+                        && prev_idx != cursor_idx
+                    {
+                        let _ = out.write_all(&Self::build_tile_cursor_escape(
+                            grid, prev_idx, image_area, false, // clear
+                        ));
+                    }
+                    // Draw new cursor
+                    let _ = out.write_all(&Self::build_tile_cursor_escape(
+                        grid, cursor_idx, image_area, true, // draw
+                    ));
+                    let _ = out.flush();
+                }
+            }
         }
     }
 
@@ -361,6 +392,8 @@ impl TerminalWriter {
         // Nerdfont icons and Powerline separator
         const ICON_READY: &str = "\u{f012c}"; //  (nf-md-check)
         const ICON_BUSY: &str = "\u{f110}"; //  (nf-fa-spinner)
+        const ICON_FIT: &str = "\u{f004c}"; //  (nf-md-arrow_expand_all)
+        const ICON_TILE: &str = "\u{f11d9}"; //  (nf-md-view_grid_outline)
         const SEP: &str = "\u{e0b0}"; //  (Powerline separator)
 
         // ANSI 16-color (uses terminal theme colors)
@@ -371,6 +404,8 @@ impl TerminalWriter {
         const BG_MAIN: u8 = 40; // Black
         const BG_READY: u8 = 42; // Green
         const BG_BUSY: u8 = 43; // Yellow
+        const BG_FIT: u8 = 45; // Magenta
+        const BG_TILE: u8 = 46; // Cyan
 
         let row_1based = h;
         // Reserve 4 columns for icon segment " X  " (icon + spaces + separator)
@@ -380,6 +415,8 @@ impl TerminalWriter {
         let (icon, fg_indicator, bg_indicator) = match indicator {
             StatusIndicator::Ready => (ICON_READY, BG_READY - 10, BG_READY), // fg=32 (Green)
             StatusIndicator::Busy => (ICON_BUSY, BG_BUSY - 10, BG_BUSY),     // fg=33 (Yellow)
+            StatusIndicator::Fit => (ICON_FIT, BG_FIT - 10, BG_FIT),         // fg=35 (Magenta)
+            StatusIndicator::Tile => (ICON_TILE, BG_TILE - 10, BG_TILE),     // fg=36 (Cyan)
         };
 
         // Clear line with main background
@@ -398,6 +435,101 @@ impl TerminalWriter {
         write!(out, "\x1b[{FG_LIGHT};{BG_MAIN}m {clipped}\x1b[0m")?;
 
         Ok(())
+    }
+
+    /// Build ANSI escape sequence to draw or clear tile cursor border.
+    fn build_tile_cursor_escape(
+        grid: (usize, usize),
+        cursor_idx: usize,
+        image_area: Rect,
+        draw: bool,
+    ) -> Vec<u8> {
+        let (cols, rows) = grid;
+        if cols == 0 || rows == 0 || cursor_idx >= cols * rows {
+            return Vec::new();
+        }
+
+        // Calculate tile position in terminal cells
+        let tile_w = image_area.width / cols as u16;
+        let tile_h = image_area.height / rows as u16;
+        if tile_w == 0 || tile_h == 0 {
+            return Vec::new();
+        }
+
+        let col = cursor_idx % cols;
+        let row = cursor_idx / cols;
+        let tile_x = image_area.x + (col as u16 * tile_w);
+        let tile_y = image_area.y + (row as u16 * tile_h);
+
+        // Calculate right/bottom edges using next tile's position to avoid rounding errors
+        let tile_x_end = if col + 1 < cols {
+            image_area.x + ((col + 1) as u16 * tile_w)
+        } else {
+            image_area.x + image_area.width
+        };
+        let tile_y_end = if row + 1 < rows {
+            image_area.y + ((row + 1) as u16 * tile_h)
+        } else {
+            image_area.y + image_area.height
+        };
+
+        // Unicode box drawing characters
+        const TOP_LEFT: char = '┌';
+        const TOP_RIGHT: char = '┐';
+        const BOTTOM_LEFT: char = '└';
+        const BOTTOM_RIGHT: char = '┘';
+        const HORIZONTAL: char = '─';
+        const VERTICAL: char = '│';
+
+        let mut buf = Vec::new();
+
+        if draw {
+            // Cyan color (foreground 36)
+            buf.extend_from_slice(b"\x1b[36m");
+        } else {
+            // Reset color (draw spaces to clear)
+            buf.extend_from_slice(b"\x1b[0m");
+        }
+
+        let char_h = if draw { HORIZONTAL } else { ' ' };
+        let char_v = if draw { VERTICAL } else { ' ' };
+        let char_tl = if draw { TOP_LEFT } else { ' ' };
+        let char_tr = if draw { TOP_RIGHT } else { ' ' };
+        let char_bl = if draw { BOTTOM_LEFT } else { ' ' };
+        let char_br = if draw { BOTTOM_RIGHT } else { ' ' };
+
+        // Top edge: move to position, draw corner + horizontal line + corner
+        let top_row = tile_y + 1; // 1-based
+        let left_col = tile_x + 1; // 1-based
+        let right_col = tile_x_end; // 1-based (last column of tile, calculated from next tile's start)
+
+        // Draw top-left corner
+        buf.extend_from_slice(format!("\x1b[{};{}H{}", top_row, left_col, char_tl).as_bytes());
+        // Draw top horizontal line
+        for c in (left_col + 1)..right_col {
+            buf.extend_from_slice(format!("\x1b[{};{}H{}", top_row, c, char_h).as_bytes());
+        }
+        // Draw top-right corner
+        buf.extend_from_slice(format!("\x1b[{};{}H{}", top_row, right_col, char_tr).as_bytes());
+
+        // Bottom edge
+        let bottom_row = tile_y_end; // 1-based (last row of tile, calculated from next tile's start)
+        buf.extend_from_slice(format!("\x1b[{};{}H{}", bottom_row, left_col, char_bl).as_bytes());
+        for c in (left_col + 1)..right_col {
+            buf.extend_from_slice(format!("\x1b[{};{}H{}", bottom_row, c, char_h).as_bytes());
+        }
+        buf.extend_from_slice(format!("\x1b[{};{}H{}", bottom_row, right_col, char_br).as_bytes());
+
+        // Left and right edges (vertical lines)
+        for r in (top_row + 1)..bottom_row {
+            buf.extend_from_slice(format!("\x1b[{};{}H{}", r, left_col, char_v).as_bytes());
+            buf.extend_from_slice(format!("\x1b[{};{}H{}", r, right_col, char_v).as_bytes());
+        }
+
+        // Reset attributes
+        buf.extend_from_slice(b"\x1b[0m");
+
+        buf
     }
 }
 
