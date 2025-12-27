@@ -65,6 +65,7 @@ pub enum WriterRequest {
         cursor_idx: usize,
         image_area: Rect,
         prev_cursor_idx: Option<usize>,
+        cell_size: (u16, u16),
     },
     Shutdown,
 }
@@ -294,6 +295,7 @@ impl TerminalWriter {
                 cursor_idx,
                 image_area,
                 prev_cursor_idx,
+                cell_size,
             } => {
                 if is_tty {
                     // Clear previous cursor if different
@@ -301,12 +303,12 @@ impl TerminalWriter {
                         && prev_idx != cursor_idx
                     {
                         let _ = out.write_all(&Self::build_tile_cursor_escape(
-                            grid, prev_idx, image_area, false, // clear
+                            grid, prev_idx, image_area, cell_size, false, // clear
                         ));
                     }
                     // Draw new cursor
                     let _ = out.write_all(&Self::build_tile_cursor_escape(
-                        grid, cursor_idx, image_area, true, // draw
+                        grid, cursor_idx, image_area, cell_size, true, // draw
                     ));
                     let _ = out.flush();
                 }
@@ -442,6 +444,7 @@ impl TerminalWriter {
         grid: (usize, usize),
         cursor_idx: usize,
         image_area: Rect,
+        cell_size: (u16, u16),
         draw: bool,
     ) -> Vec<u8> {
         let (cols, rows) = grid;
@@ -449,26 +452,40 @@ impl TerminalWriter {
             return Vec::new();
         }
 
-        // Calculate tile position in terminal cells
-        let tile_w = image_area.width / cols as u16;
-        let tile_h = image_area.height / rows as u16;
-        if tile_w == 0 || tile_h == 0 {
+        let (cell_w, cell_h) = cell_size;
+        if cell_w == 0 || cell_h == 0 {
+            return Vec::new();
+        }
+
+        // Calculate tile position using pixel-based calculation (matching worker.rs)
+        // This avoids cumulative rounding errors from cell-based division
+        let canvas_w = u32::from(image_area.width) * u32::from(cell_w);
+        let canvas_h = u32::from(image_area.height) * u32::from(cell_h);
+        let tile_w_px = canvas_w / cols as u32;
+        let tile_h_px = canvas_h / rows as u32;
+        if tile_w_px == 0 || tile_h_px == 0 {
             return Vec::new();
         }
 
         let col = cursor_idx % cols;
         let row = cursor_idx / cols;
-        let tile_x = image_area.x + (col as u16 * tile_w);
-        let tile_y = image_area.y + (row as u16 * tile_h);
 
-        // Calculate right/bottom edges using next tile's position to avoid rounding errors
+        // Calculate pixel position, then convert to cell position
+        let tile_x_px = col as u32 * tile_w_px;
+        let tile_y_px = row as u32 * tile_h_px;
+        let tile_x = image_area.x + (tile_x_px / u32::from(cell_w)) as u16;
+        let tile_y = image_area.y + (tile_y_px / u32::from(cell_h)) as u16;
+
+        // Calculate right/bottom edges using next tile's pixel position
         let tile_x_end = if col + 1 < cols {
-            image_area.x + ((col + 1) as u16 * tile_w)
+            let next_x_px = (col + 1) as u32 * tile_w_px;
+            image_area.x + (next_x_px / u32::from(cell_w)) as u16
         } else {
             image_area.x + image_area.width
         };
         let tile_y_end = if row + 1 < rows {
-            image_area.y + ((row + 1) as u16 * tile_h)
+            let next_y_px = (row + 1) as u32 * tile_h_px;
+            image_area.y + (next_y_px / u32::from(cell_h)) as u16
         } else {
             image_area.y + image_area.height
         };

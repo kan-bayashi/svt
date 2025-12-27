@@ -248,6 +248,7 @@ impl App {
             cursor_idx: cursor_in_page,
             image_area,
             prev_cursor_idx: prev_cursor_in_page,
+            cell_size: self.picker.font_size(),
         });
     }
 
