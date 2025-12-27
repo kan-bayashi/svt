@@ -4,6 +4,7 @@
 
 *A minimal & fast terminal image viewer written in Rust with sxiv-like keybindings*
 
+[![CI](https://github.com/kan-bayashi/svt/actions/workflows/ci.yml/badge.svg)](https://github.com/kan-bayashi/svt/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![GitHub stars](https://img.shields.io/github/stars/kan-bayashi/svt?style=social)](https://github.com/kan-bayashi/svt)
