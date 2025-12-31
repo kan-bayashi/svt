@@ -4,8 +4,8 @@
 //! Configuration management.
 //!
 //! Config values are loaded with the following priority (highest to lowest):
-//! 1. Environment variables (SVT_*)
-//! 2. Config file (~/.config/svt/config.toml)
+//! 1. Environment variables (STIV_*)
+//! 2. Config file (~/.config/stiv/config.toml)
 //! 3. Default values
 
 use serde::Deserialize;
@@ -82,7 +82,7 @@ impl Config {
     }
 
     fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("svt").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("stiv").join("config.toml"))
     }
 
     fn load_from_file() -> Option<Self> {
@@ -92,49 +92,49 @@ impl Config {
     }
 
     fn apply_env_overrides(&mut self) {
-        if let Some(v) = Self::parse_env::<u64>("SVT_NAV_LATCH_MS") {
+        if let Some(v) = Self::parse_env::<u64>("STIV_NAV_LATCH_MS") {
             self.nav_latch_ms = v;
         }
-        if std::env::var_os("SVT_FORCE_ALT_SCREEN").is_some() {
+        if std::env::var_os("STIV_FORCE_ALT_SCREEN").is_some() {
             self.force_alt_screen = true;
         }
-        if std::env::var_os("SVT_NO_ALT_SCREEN").is_some() {
+        if std::env::var_os("STIV_NO_ALT_SCREEN").is_some() {
             self.no_alt_screen = true;
         }
-        if let Some(v) = Self::parse_env::<usize>("SVT_RENDER_CACHE_SIZE") {
+        if let Some(v) = Self::parse_env::<usize>("STIV_RENDER_CACHE_SIZE") {
             self.render_cache_size = v;
         }
-        if let Some(v) = Self::parse_env::<usize>("SVT_PREFETCH_COUNT") {
+        if let Some(v) = Self::parse_env::<usize>("STIV_PREFETCH_COUNT") {
             self.prefetch_count = v;
         }
-        if std::env::var_os("SVT_DEBUG").is_some() {
+        if std::env::var_os("STIV_DEBUG").is_some() {
             self.debug = true;
         }
-        if std::env::var_os("SVT_KGP_NO_COMPRESS").is_some() {
+        if std::env::var_os("STIV_KGP_NO_COMPRESS").is_some() {
             self.kgp_no_compress = true;
         }
-        if let Some(v) = Self::parse_env::<u32>("SVT_COMPRESS_LEVEL") {
+        if let Some(v) = Self::parse_env::<u32>("STIV_COMPRESS_LEVEL") {
             self.compress_level = v;
         }
-        if let Some(v) = Self::parse_env::<u64>("SVT_TMUX_KITTY_MAX_PIXELS") {
+        if let Some(v) = Self::parse_env::<u64>("STIV_TMUX_KITTY_MAX_PIXELS") {
             self.tmux_kitty_max_pixels = v;
         }
-        if std::env::var_os("SVT_TRACE_WORKER").is_some() {
+        if std::env::var_os("STIV_TRACE_WORKER").is_some() {
             self.trace_worker = true;
         }
-        if let Some(v) = Self::parse_env::<f64>("SVT_CELL_ASPECT_RATIO") {
+        if let Some(v) = Self::parse_env::<f64>("STIV_CELL_ASPECT_RATIO") {
             self.cell_aspect_ratio = v;
         }
-        if let Ok(v) = std::env::var("SVT_RESIZE_FILTER") {
+        if let Ok(v) = std::env::var("STIV_RESIZE_FILTER") {
             self.resize_filter = v;
         }
-        if let Ok(v) = std::env::var("SVT_TILE_FILTER") {
+        if let Ok(v) = std::env::var("STIV_TILE_FILTER") {
             self.tile_filter = v;
         }
-        if let Some(v) = Self::parse_env::<usize>("SVT_PREFETCH_THREADS") {
+        if let Some(v) = Self::parse_env::<usize>("STIV_PREFETCH_THREADS") {
             self.prefetch_threads = v;
         }
-        if let Some(v) = Self::parse_env::<usize>("SVT_TILE_THREADS") {
+        if let Some(v) = Self::parse_env::<usize>("STIV_TILE_THREADS") {
             self.tile_threads = v;
         }
     }

@@ -1,6 +1,6 @@
 [package]
-name = "svt"
-version = "25.12.6"
+name = "stiv"
+version = "25.12.7"
 edition = "2024"
 description = "Simple Viewer in Terminal - sxiv-like terminal image viewer"
 

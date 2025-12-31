@@ -38,7 +38,7 @@ use crate::config::Config;
 use crate::fit::ViewMode;
 
 #[derive(Parser, Debug)]
-#[command(name = "svt", about = "Simple Viewer in Terminal")]
+#[command(name = "stiv", about = "Simple Terminal Image Viewer")]
 struct Cli {
     /// Image file(s) and/or directory path(s)
     #[arg(required = true)]
@@ -507,19 +507,19 @@ mod tests {
 
     #[test]
     fn test_cli_parses_file_path() {
-        let cli = Cli::try_parse_from(["svt", "image.png"]).unwrap();
+        let cli = Cli::try_parse_from(["stiv", "image.png"]).unwrap();
         assert_eq!(cli.paths, vec![PathBuf::from("image.png")]);
     }
 
     #[test]
     fn test_cli_parses_directory_path() {
-        let cli = Cli::try_parse_from(["svt", "/home/user/photos"]).unwrap();
+        let cli = Cli::try_parse_from(["stiv", "/home/user/photos"]).unwrap();
         assert_eq!(cli.paths, vec![PathBuf::from("/home/user/photos")]);
     }
 
     #[test]
     fn test_cli_requires_paths_argument() {
-        let result = Cli::try_parse_from(["svt"]);
+        let result = Cli::try_parse_from(["stiv"]);
         assert!(result.is_err());
     }
 
@@ -551,7 +551,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_single_file() {
-        let dir = PathBuf::from("/tmp/svt_test_single");
+        let dir = PathBuf::from("/tmp/stiv_test_single");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("test.png");
@@ -566,7 +566,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_directory() {
-        let dir = PathBuf::from("/tmp/svt_test_dir");
+        let dir = PathBuf::from("/tmp/stiv_test_dir");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         File::create(dir.join("a.png")).unwrap();
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_non_image_file_error() {
-        let dir = PathBuf::from("/tmp/svt_test_non_image");
+        let dir = PathBuf::from("/tmp/stiv_test_non_image");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = dir.join("test.txt");
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_collect_images_empty_dir_error() {
-        let dir = PathBuf::from("/tmp/svt_test_empty");
+        let dir = PathBuf::from("/tmp/stiv_test_empty");
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
 

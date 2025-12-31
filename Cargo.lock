@@ -1592,6 +1592,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "stiv"
+version = "25.12.7"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "base64-simd",
+ "clap",
+ "dirs",
+ "flate2",
+ "image",
+ "ratatui",
+ "ratatui-image",
+ "rayon",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1617,24 +1635,6 @@ dependencies = [
  "quote",
  "rustversion",
  "syn",
-]
-
-[[package]]
-name = "svt"
-version = "25.12.6"
-dependencies = [
- "anyhow",
- "arboard",
- "base64-simd",
- "clap",
- "dirs",
- "flate2",
- "image",
- "ratatui",
- "ratatui-image",
- "rayon",
- "serde",
- "toml",
 ]
 
 [[package]]

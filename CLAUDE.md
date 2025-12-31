@@ -1,8 +1,8 @@
-# svt - Project Guide
+# stiv - Project Guide
 
 ## Overview
 
-SVT (Simple Viewer in Terminal) - A terminal-based image viewer with sxiv-like keybindings.
+STIV (Simple Terminal Image Viewer) - A terminal-based image viewer with sxiv-like keybindings.
 
 ## Tech Stack
 
@@ -16,7 +16,7 @@ SVT (Simple Viewer in Terminal) - A terminal-based image viewer with sxiv-like k
 ## Project Structure
 
 ```
-svt/
+stiv/
 ├── Cargo.toml
 ├── docs/
 │   └── architecture.md
@@ -46,7 +46,7 @@ See [README.md](README.md#keybindings).
 
 ## Configuration
 
-Settings: `~/.config/svt/config.toml` or environment variables (`SVT_*`).
+Settings: `~/.config/stiv/config.toml` or environment variables (`STIV_*`).
 
 **Priority:** Environment variables > Config file > Defaults
 

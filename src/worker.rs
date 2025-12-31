@@ -110,7 +110,7 @@ pub struct ImageRequest {
     pub compress_level: Option<u32>,
     /// Max pixels for tmux+kitty compatibility.
     pub tmux_kitty_max_pixels: u64,
-    /// Enable trace logging to /tmp/svt_worker.log.
+    /// Enable trace logging to /tmp/stiv_worker.log.
     pub trace_worker: bool,
     /// Resize filter for Single mode.
     pub resize_filter: image::imageops::FilterType,
@@ -304,7 +304,7 @@ impl ImageWorker {
             if let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open("/tmp/svt_worker.log")
+                .open("/tmp/stiv_worker.log")
             {
                 let _ = writeln!(
                     f,
@@ -524,7 +524,7 @@ impl ImageWorker {
                                 if let Ok(mut f) = std::fs::OpenOptions::new()
                                     .create(true)
                                     .append(true)
-                                    .open("/tmp/svt_worker.log")
+                                    .open("/tmp/stiv_worker.log")
                                 {
                                     let _ = writeln!(f, "tile decode failed: {:?}", info.path);
                                 }

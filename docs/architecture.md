@@ -1,6 +1,6 @@
 # Architecture
 
-`svt` is a terminal image viewer built around Kitty Graphics Protocol (KGP).
+`stiv` is a terminal image viewer built around Kitty Graphics Protocol (KGP).
 The core goal is: keep navigation/status updates responsive even when image rendering or terminal I/O is slow.
 
 ## High-level pipeline
@@ -26,7 +26,7 @@ There are three concurrent "lanes":
 
 ## View Modes
 
-`svt` supports two view modes:
+`stiv` supports two view modes:
 
 ### Single Mode (default)
 - Displays one image at a time
@@ -92,7 +92,7 @@ This design prevents "blank screen" issues that occur when image data is partial
 
 ## KGP ID Strategy
 
-`svt` uses a single KGP ID per process (inspired by Yazi):
+`stiv` uses a single KGP ID per process (inspired by Yazi):
 
 - The ID is generated at startup based on the process ID.
 - RGB components are ensured to be >= 16 to avoid terminal color quantization issues.
@@ -111,7 +111,7 @@ This approach:
 
 ## Caching
 
-`svt` uses a **client-side render cache** only:
+`stiv` uses a **client-side render cache** only:
 
 - **Render cache** (`render_cache` in `App`): Stores decoded/resized/encoded image data.
 - Size controlled by `render_cache_size` config (default: 100).
@@ -123,8 +123,8 @@ The terminal-side cache is **not** relied upon. Each transmit starts with `delet
 
 Settings are loaded at startup by `Config::load()` (`src/config.rs`):
 
-1. Load from `~/.config/svt/config.toml` (if exists).
-2. Override with environment variables (`SVT_*`).
+1. Load from `~/.config/stiv/config.toml` (if exists).
+2. Override with environment variables (`STIV_*`).
 3. Apply defaults for missing values.
 
 **Priority:** Environment variables > Config file > Defaults
@@ -167,7 +167,7 @@ These invariants must be preserved when modifying the codebase:
 
 ## Clipboard Support
 
-`svt` provides two clipboard copy methods via `y` and `Y` keys:
+`stiv` provides two clipboard copy methods via `y` and `Y` keys:
 
 ### Path Copy (`y` key)
 

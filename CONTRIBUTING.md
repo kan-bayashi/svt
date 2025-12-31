@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to `svt`.
+Thanks for contributing to `stiv`.
 
 ## Quick Start
 
@@ -27,8 +27,8 @@ For debugging:
 
 | Config | Env | Description |
 |--------|-----|-------------|
-| `debug` | `SVT_DEBUG` | Show debug info in status bar |
-| `trace_worker` | `SVT_TRACE_WORKER` | Write timing logs to `/tmp/svt_worker.log` |
+| `debug` | `STIV_DEBUG` | Show debug info in status bar |
+| `trace_worker` | `STIV_TRACE_WORKER` | Write timing logs to `/tmp/stiv_worker.log` |
 
 ## Testing Tips
 
