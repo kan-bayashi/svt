@@ -49,12 +49,13 @@
 
 ### 🖥️ Supported Terminals
 
+STIV uses [Kitty Graphics Protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) with **Unicode Placeholders** for image rendering.
+
 | Terminal | Status |
 |----------|--------|
-| [Ghostty](https://ghostty.org/) | ✅ Recommended |
+| [Ghostty](https://ghostty.org/) | ✅ Tested |
 | [Kitty](https://sw.kovidgoyal.net/kitty/) | ✅ Supported |
-| [WezTerm](https://wezfurlong.org/wezterm/) | ✅ Supported |
-| Other KGP terminals | ✅ Supported |
+| Other terminals with KGP + Unicode Placeholder support | ✅ Supported |
 
 > 💡 **tmux:** Works with tmux. Passthrough is enabled automatically.
 
